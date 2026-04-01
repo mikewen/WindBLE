@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Background circle -->
+    <path
+        android:fillColor="#0A0E1A"
+        android:pathData="M0,0 L108,0 L108,108 L0,108 Z"/>
+    <!-- Compass ring -->
+    <path
+        android:strokeColor="#2A3A60"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,10 A44,44 0 1,1 53.99,10 Z"/>
+    <!-- N tick red -->
+    <path
+        android:fillColor="#FF4444"
+        android:pathData="M54,14 L56,22 L54,20 L52,22 Z"/>
+    <!-- Wind arrow (True wind - orange) pointing NNE -->
+    <path
+        android:fillColor="#FF6B35"
+        android:pathData="M54,54 L62,24 L58,30 L50,30 Z"/>
+    <!-- Wind arrow (Apparent - cyan) pointing NW -->
+    <path
+        android:strokeColor="#00E5FF"
+        android:strokeWidth="3"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,54 L34,30"/>
+    <path
+        android:fillColor="#00E5FF"
+        android:pathData="M34,30 L40,36 L32,38 Z"/>
+    <!-- Boat hull -->
+    <path
+        android:strokeColor="#A0C0FF"
+        android:strokeWidth="2.5"
+        android:fillColor="@android:color/transparent"
+        android:pathData="M54,44 L60,60 L57,64 L51,64 L48,60 Z"/>
+</vector>

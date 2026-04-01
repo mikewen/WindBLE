@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Backgrounds -->
+    <color name="bg_dark">#0A0E1A</color>
+    <color name="bg_card">#0F1626</color>
+    <color name="bg_card_2">#131B30</color>
+    <color name="divider">#1A2540</color>
+
+    <!-- Text -->
+    <color name="text_primary">#E8F0FF</color>
+    <color name="text_secondary">#6880A8</color>
+
+    <!-- Wind -->
+    <color name="color_apparent">#00E5FF</color>
+    <color name="color_true">#FF6B35</color>
+    <color name="color_gps">#4CAF50</color>
+
+    <!-- Status -->
+    <color name="color_connected">#4CAF50</color>
+    <color name="color_connecting">#FFC107</color>
+    <color name="color_disconnected">#FF5252</color>
+
+    <!-- Accent -->
+    <color name="color_accent">#4A90FF</color>
+    <color name="color_north">#FF4444</color>
+
+    <!-- Material theme required -->
+    <color name="purple_200">#FFBB86FC</color>
+    <color name="purple_500">#FF6200EE</color>
+    <color name="purple_700">#FF3700B3</color>
+    <color name="teal_200">#FF03DAC5</color>
+    <color name="teal_700">#FF018786</color>
+    <color name="black">#FF000000</color>
+    <color name="white">#FFFFFFFF</color>
+</resources>

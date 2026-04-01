@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string-array name="speed_unit_entries">
+        <item>Knots (kt)</item>
+        <item>Metres per second (m/s)</item>
+        <item>Kilometres per hour (km/h)</item>
+    </string-array>
+    <string-array name="speed_unit_values">
+        <item>knots</item>
+        <item>ms</item>
+        <item>kmh</item>
+    </string-array>
+</resources>

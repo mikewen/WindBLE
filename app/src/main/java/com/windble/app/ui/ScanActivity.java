@@ -1,0 +1,234 @@
+package com.windble.app.ui;
+
+import android.Manifest;
+import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
+import android.bluetooth.BluetoothManager;
+import android.bluetooth.le.BluetoothLeScanner;
+import android.bluetooth.le.ScanCallback;
+import android.bluetooth.le.ScanResult;
+import android.content.Context;
+import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.os.Build;
+import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
+import android.view.LayoutInflater;
+import android.view.MenuItem;
+import android.view.View;
+import android.view.ViewGroup;
+import android.widget.TextView;
+import android.widget.Toast;
+
+import androidx.annotation.NonNull;
+import androidx.appcompat.app.AppCompatActivity;
+import androidx.core.app.ActivityCompat;
+import androidx.recyclerview.widget.LinearLayoutManager;
+import androidx.recyclerview.widget.RecyclerView;
+
+import com.windble.app.R;
+
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+
+public class ScanActivity extends AppCompatActivity {
+
+    public static final String EXTRA_ADDRESS = "device_address";
+    private static final long SCAN_PERIOD_MS = 15000;
+
+    private BluetoothAdapter mAdapter;
+    private BluetoothLeScanner mScanner;
+    private Handler mHandler = new Handler(Looper.getMainLooper());
+    private boolean mScanning = false;
+
+    private DeviceAdapter mDeviceAdapter;
+    private TextView mTvScanStatus;
+    private View mProgressBar;
+
+    private final List<ScannedDevice> mDevices = new ArrayList<>();
+    private final Set<String> mSeenAddresses = new HashSet<>();
+
+    @Override
+    protected void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_scan);
+
+        if (getSupportActionBar() != null) {
+            getSupportActionBar().setDisplayHomeAsUpEnabled(true);
+            getSupportActionBar().setTitle("Scan for Wind Sensor");
+        }
+
+        BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
+        mAdapter = bm != null ? bm.getAdapter() : null;
+
+        mTvScanStatus = findViewById(R.id.tvScanStatus);
+        mProgressBar = findViewById(R.id.scanProgress);
+
+        RecyclerView rv = findViewById(R.id.rvDevices);
+        rv.setLayoutManager(new LinearLayoutManager(this));
+        mDeviceAdapter = new DeviceAdapter(mDevices);
+        rv.setAdapter(mDeviceAdapter);
+
+        mDeviceAdapter.setOnClickListener(device -> {
+            stopScan();
+            Intent result = new Intent();
+            result.putExtra(EXTRA_ADDRESS, device.address);
+            setResult(RESULT_OK, result);
+            finish();
+        });
+
+        startScan();
+    }
+
+    private void startScan() {
+        if (mAdapter == null) {
+            Toast.makeText(this, "Bluetooth not available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        boolean hasPermission;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            hasPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+        } else {
+            hasPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        if (!hasPermission) {
+            Toast.makeText(this, "Bluetooth scan permission required", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        mScanner = mAdapter.getBluetoothLeScanner();
+        if (mScanner == null) {
+            Toast.makeText(this, "BLE not available", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        mDevices.clear();
+        mSeenAddresses.clear();
+        mDeviceAdapter.notifyDataSetChanged();
+
+        mScanning = true;
+        mProgressBar.setVisibility(View.VISIBLE);
+        mTvScanStatus.setText(R.string.scanning);
+
+        try {
+            mScanner.startScan(mScanCallback);
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
+            return;
+        }
+
+        mHandler.postDelayed(this::stopScan, SCAN_PERIOD_MS);
+    }
+
+    private void stopScan() {
+        if (!mScanning) return;
+        mScanning = false;
+        mProgressBar.setVisibility(View.GONE);
+        mTvScanStatus.setText(mDevices.isEmpty() ? getString(R.string.no_devices) : getString(R.string.tap_to_connect));
+        try {
+            if (mScanner != null) mScanner.stopScan(mScanCallback);
+        } catch (SecurityException ignored) {}
+    }
+
+    private final ScanCallback mScanCallback = new ScanCallback() {
+        @Override
+        public void onScanResult(int callbackType, ScanResult result) {
+            BluetoothDevice device = result.getDevice();
+            String address = device.getAddress();
+            if (mSeenAddresses.contains(address)) return;
+            mSeenAddresses.add(address);
+
+            String name;
+            try {
+                name = device.getName();
+            } catch (SecurityException e) {
+                name = null;
+            }
+            if (name == null || name.isEmpty()) name = "Unknown Device";
+
+            ScannedDevice sd = new ScannedDevice(name, address, result.getRssi());
+            mDevices.add(sd);
+            runOnUiThread(() -> mDeviceAdapter.notifyItemInserted(mDevices.size() - 1));
+        }
+
+        @Override
+        public void onScanFailed(int errorCode) {
+            runOnUiThread(() -> {
+                mTvScanStatus.setText("Scan failed: " + errorCode);
+                mProgressBar.setVisibility(View.GONE);
+            });
+        }
+    };
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        if (item.getItemId() == android.R.id.home) {
+            finish();
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopScan();
+        super.onDestroy();
+    }
+
+    // ---- Data classes ----
+
+    static class ScannedDevice {
+        String name, address;
+        int rssi;
+        ScannedDevice(String name, String address, int rssi) {
+            this.name = name; this.address = address; this.rssi = rssi;
+        }
+    }
+
+    // ---- Adapter ----
+
+    static class DeviceAdapter extends RecyclerView.Adapter<DeviceAdapter.VH> {
+        interface OnClick { void onClick(ScannedDevice device); }
+
+        private final List<ScannedDevice> mList;
+        private OnClick mListener;
+
+        DeviceAdapter(List<ScannedDevice> list) { mList = list; }
+        void setOnClickListener(OnClick l) { mListener = l; }
+
+        @NonNull
+        @Override
+        public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+            View v = LayoutInflater.from(parent.getContext())
+                    .inflate(R.layout.item_device, parent, false);
+            return new VH(v);
+        }
+
+        @Override
+        public void onBindViewHolder(@NonNull VH h, int pos) {
+            ScannedDevice d = mList.get(pos);
+            h.tvName.setText(d.name);
+            h.tvAddress.setText(d.address);
+            h.tvRssi.setText(d.rssi + " dBm");
+            h.itemView.setOnClickListener(v -> { if (mListener != null) mListener.onClick(d); });
+        }
+
+        @Override
+        public int getItemCount() { return mList.size(); }
+
+        static class VH extends RecyclerView.ViewHolder {
+            TextView tvName, tvAddress, tvRssi;
+            VH(View v) {
+                super(v);
+                tvName = v.findViewById(R.id.tvDeviceName);
+                tvAddress = v.findViewById(R.id.tvDeviceAddress);
+                tvRssi = v.findViewById(R.id.tvDeviceRssi);
+            }
+        }
+    }
+}
