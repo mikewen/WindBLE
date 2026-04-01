@@ -17,6 +17,11 @@
         app:showAsAction="never"/>
 
     <item
+        android:id="@+id/action_add_ble_gps"
+        android:title="@string/action_add_ble_gps"
+        app:showAsAction="never"/>
+
+    <item
         android:id="@+id/action_settings"
         android:title="@string/action_settings"
         app:showAsAction="never"/>

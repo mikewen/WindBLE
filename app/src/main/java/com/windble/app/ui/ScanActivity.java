@@ -24,6 +24,7 @@ import android.widget.Toast;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
+import androidx.recyclerview.widget.DividerItemDecoration;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -36,39 +37,50 @@ import java.util.Set;
 
 public class ScanActivity extends AppCompatActivity {
 
-    public static final String EXTRA_ADDRESS = "device_address";
-    private static final long SCAN_PERIOD_MS = 15000;
+    public static final String EXTRA_SCAN_MODE = "scan_mode";
+    public static final String EXTRA_ADDRESS   = "device_address";
+    public static final String EXTRA_NAME      = "device_name";
+
+    public static final int MODE_WIND = 0;
+    public static final int MODE_GPS  = 1;
+
+    private static final long SCAN_PERIOD_MS = 20_000;
 
     private BluetoothAdapter mAdapter;
     private BluetoothLeScanner mScanner;
-    private Handler mHandler = new Handler(Looper.getMainLooper());
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
     private boolean mScanning = false;
+    private int mScanMode = MODE_WIND;
 
     private DeviceAdapter mDeviceAdapter;
     private TextView mTvScanStatus;
     private View mProgressBar;
 
     private final List<ScannedDevice> mDevices = new ArrayList<>();
-    private final Set<String> mSeenAddresses = new HashSet<>();
+    private final Set<String> mSeen = new HashSet<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_scan);
 
+        mScanMode = getIntent().getIntExtra(EXTRA_SCAN_MODE, MODE_WIND);
+
         if (getSupportActionBar() != null) {
             getSupportActionBar().setDisplayHomeAsUpEnabled(true);
-            getSupportActionBar().setTitle("Scan for Wind Sensor");
+            getSupportActionBar().setTitle(mScanMode == MODE_GPS
+                    ? "Add BLE GPS Device" : "Scan for Wind Sensor");
         }
 
         BluetoothManager bm = (BluetoothManager) getSystemService(Context.BLUETOOTH_SERVICE);
         mAdapter = bm != null ? bm.getAdapter() : null;
 
         mTvScanStatus = findViewById(R.id.tvScanStatus);
-        mProgressBar = findViewById(R.id.scanProgress);
+        mProgressBar  = findViewById(R.id.scanProgress);
 
         RecyclerView rv = findViewById(R.id.rvDevices);
         rv.setLayoutManager(new LinearLayoutManager(this));
+        rv.addItemDecoration(new DividerItemDecoration(this, DividerItemDecoration.VERTICAL));
         mDeviceAdapter = new DeviceAdapter(mDevices);
         rv.setAdapter(mDeviceAdapter);
 
@@ -76,6 +88,8 @@ public class ScanActivity extends AppCompatActivity {
             stopScan();
             Intent result = new Intent();
             result.putExtra(EXTRA_ADDRESS, device.address);
+            result.putExtra(EXTRA_NAME, device.name);
+            result.putExtra(EXTRA_SCAN_MODE, mScanMode);
             setResult(RESULT_OK, result);
             finish();
         });
@@ -88,14 +102,14 @@ public class ScanActivity extends AppCompatActivity {
             Toast.makeText(this, "Bluetooth not available", Toast.LENGTH_SHORT).show();
             return;
         }
-
         boolean hasPermission;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-            hasPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
+            hasPermission = ActivityCompat.checkSelfPermission(this,
+                    Manifest.permission.BLUETOOTH_SCAN) == PackageManager.PERMISSION_GRANTED;
         } else {
-            hasPermission = ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
+            hasPermission = ActivityCompat.checkSelfPermission(this,
+                    Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED;
         }
-
         if (!hasPermission) {
             Toast.makeText(this, "Bluetooth scan permission required", Toast.LENGTH_SHORT).show();
             return;
@@ -103,25 +117,23 @@ public class ScanActivity extends AppCompatActivity {
 
         mScanner = mAdapter.getBluetoothLeScanner();
         if (mScanner == null) {
-            Toast.makeText(this, "BLE not available", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "BLE scanner not available", Toast.LENGTH_SHORT).show();
             return;
         }
 
-        mDevices.clear();
-        mSeenAddresses.clear();
+        mDevices.clear(); mSeen.clear();
         mDeviceAdapter.notifyDataSetChanged();
-
         mScanning = true;
         mProgressBar.setVisibility(View.VISIBLE);
-        mTvScanStatus.setText(R.string.scanning);
+        mTvScanStatus.setText(mScanMode == MODE_GPS
+                ? "Scanning for BLE GPS devices\u2026"
+                : getString(R.string.scanning));
 
-        try {
-            mScanner.startScan(mScanCallback);
-        } catch (SecurityException e) {
+        try { mScanner.startScan(mScanCallback); }
+        catch (SecurityException e) {
             Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
             return;
         }
-
         mHandler.postDelayed(this::stopScan, SCAN_PERIOD_MS);
     }
 
@@ -129,10 +141,11 @@ public class ScanActivity extends AppCompatActivity {
         if (!mScanning) return;
         mScanning = false;
         mProgressBar.setVisibility(View.GONE);
-        mTvScanStatus.setText(mDevices.isEmpty() ? getString(R.string.no_devices) : getString(R.string.tap_to_connect));
-        try {
-            if (mScanner != null) mScanner.stopScan(mScanCallback);
-        } catch (SecurityException ignored) {}
+        mTvScanStatus.setText(mDevices.isEmpty()
+                ? getString(R.string.no_devices)
+                : getString(R.string.tap_to_connect));
+        try { if (mScanner != null) mScanner.stopScan(mScanCallback); }
+        catch (SecurityException ignored) {}
     }
 
     private final ScanCallback mScanCallback = new ScanCallback() {
@@ -140,26 +153,19 @@ public class ScanActivity extends AppCompatActivity {
         public void onScanResult(int callbackType, ScanResult result) {
             BluetoothDevice device = result.getDevice();
             String address = device.getAddress();
-            if (mSeenAddresses.contains(address)) return;
-            mSeenAddresses.add(address);
-
+            if (mSeen.contains(address)) return;
+            mSeen.add(address);
             String name;
-            try {
-                name = device.getName();
-            } catch (SecurityException e) {
-                name = null;
-            }
-            if (name == null || name.isEmpty()) name = "Unknown Device";
-
-            ScannedDevice sd = new ScannedDevice(name, address, result.getRssi());
-            mDevices.add(sd);
-            runOnUiThread(() -> mDeviceAdapter.notifyItemInserted(mDevices.size() - 1));
+            try { name = device.getName(); } catch (SecurityException e) { name = null; }
+            if (name == null || name.isEmpty()) name = "Unknown (" + address + ")";
+            mDevices.add(new ScannedDevice(name, address, result.getRssi()));
+            final int pos = mDevices.size() - 1;
+            runOnUiThread(() -> mDeviceAdapter.notifyItemInserted(pos));
         }
-
         @Override
         public void onScanFailed(int errorCode) {
             runOnUiThread(() -> {
-                mTvScanStatus.setText("Scan failed: " + errorCode);
+                mTvScanStatus.setText("Scan failed (error " + errorCode + ")");
                 mProgressBar.setVisibility(View.GONE);
             });
         }
@@ -167,48 +173,32 @@ public class ScanActivity extends AppCompatActivity {
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {
-        if (item.getItemId() == android.R.id.home) {
-            finish();
-            return true;
-        }
+        if (item.getItemId() == android.R.id.home) { finish(); return true; }
         return super.onOptionsItemSelected(item);
     }
-
     @Override
-    protected void onDestroy() {
-        stopScan();
-        super.onDestroy();
-    }
+    protected void onDestroy() { stopScan(); super.onDestroy(); }
 
-    // ---- Data classes ----
-
+    // ---- Model ----
     static class ScannedDevice {
-        String name, address;
-        int rssi;
-        ScannedDevice(String name, String address, int rssi) {
-            this.name = name; this.address = address; this.rssi = rssi;
-        }
+        String name, address; int rssi;
+        ScannedDevice(String n, String a, int r) { name=n; address=a; rssi=r; }
     }
 
     // ---- Adapter ----
-
     static class DeviceAdapter extends RecyclerView.Adapter<DeviceAdapter.VH> {
-        interface OnClick { void onClick(ScannedDevice device); }
-
+        interface OnClick { void onClick(ScannedDevice d); }
         private final List<ScannedDevice> mList;
         private OnClick mListener;
-
         DeviceAdapter(List<ScannedDevice> list) { mList = list; }
         void setOnClickListener(OnClick l) { mListener = l; }
 
-        @NonNull
-        @Override
+        @NonNull @Override
         public VH onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             View v = LayoutInflater.from(parent.getContext())
                     .inflate(R.layout.item_device, parent, false);
             return new VH(v);
         }
-
         @Override
         public void onBindViewHolder(@NonNull VH h, int pos) {
             ScannedDevice d = mList.get(pos);
@@ -217,17 +207,15 @@ public class ScanActivity extends AppCompatActivity {
             h.tvRssi.setText(d.rssi + " dBm");
             h.itemView.setOnClickListener(v -> { if (mListener != null) mListener.onClick(d); });
         }
-
-        @Override
-        public int getItemCount() { return mList.size(); }
+        @Override public int getItemCount() { return mList.size(); }
 
         static class VH extends RecyclerView.ViewHolder {
             TextView tvName, tvAddress, tvRssi;
             VH(View v) {
                 super(v);
-                tvName = v.findViewById(R.id.tvDeviceName);
+                tvName    = v.findViewById(R.id.tvDeviceName);
                 tvAddress = v.findViewById(R.id.tvDeviceAddress);
-                tvRssi = v.findViewById(R.id.tvDeviceRssi);
+                tvRssi    = v.findViewById(R.id.tvDeviceRssi);
             }
         }
     }

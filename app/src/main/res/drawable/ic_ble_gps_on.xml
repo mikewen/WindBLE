@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Satellite dish -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M8.1,15.9L6.7,17.3C4.5,15.1 3.2,12.2 3.2,9 3.2,5.8 4.5,2.9 6.7,0.7L8.1,2.1C6.3,3.9 5.2,6.3 5.2,9 5.2,11.7 6.3,14.1 8.1,15.9Z"/>
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M11,13L9.6,14.4C8.1,12.9 7.2,10.9 7.2,9 7.2,7.1 8.1,5.1 9.6,3.6L11,5C9.9,6.1 9.2,7.5 9.2,9 9.2,10.5 9.9,11.9 11,13Z"/>
+    <!-- Bluetooth symbol (small, right side) -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M17.5,8.5L15,6v4.5L13,9l-0.7,0.7 2.2,2.2-2.2,2.2 0.7,0.7 2-1.5V18l2.5,-2.5c0.3,-0.3 0.3,-0.7 0,-1L17.5,13l1.2,-1.2c0.3,-0.3 0.3,-0.8 0,-1.1L17.5,8.5zM16,8.8l0.9,0.9L16,11V8.8zM16.9,15.3L16,16.2V14l0.9,1.3z"/>
+    <!-- Center dot -->
+    <path
+        android:fillColor="#4CAF50"
+        android:pathData="M12,8.5A0.5,0.5 0,1,1 11,8.5A0.5,0.5 0,1,1 12,8.5Z"/>
+</vector>
