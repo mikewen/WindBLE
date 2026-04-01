@@ -15,6 +15,10 @@
     <string name="action_show_true">Show True Wind</string>
     <string name="pref_speed_unit">Speed Unit</string>
     <string name="action_add_ble_gps">Add BLE GPS…</string>
+    <string name="action_night_mode">Night Mode (Red)</string>
+    <string name="action_large_number">Large Number View</string>
+    <string name="action_shift_alert">Wind Shift Alert</string>
+    <string name="action_log_trip">Start Recording</string>
     <string name="pref_speed_unit_key">speed_unit</string>
     <string name="pref_auto_reconnect">Auto-reconnect</string>
     <string name="pref_auto_reconnect_key">auto_reconnect</string>

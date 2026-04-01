@@ -8,10 +8,13 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.view.View;
 import android.view.WindowManager;
 import android.widget.ImageView;
 import android.widget.TextView;
@@ -27,6 +30,7 @@ import androidx.lifecycle.ViewModelProvider;
 import androidx.preference.PreferenceManager;
 
 import com.windble.app.R;
+import com.windble.app.alert.WindShiftAlert;
 import com.windble.app.ble.BleConstants;
 import com.windble.app.model.WindData;
 
@@ -39,40 +43,35 @@ public class MainActivity extends AppCompatActivity {
     private WindCompassView mCompassView;
     private TextView mTvAws, mTvAwa, mTvTws, mTvTwa, mTvTwd, mTvSog, mTvCog, mTvHeading;
     private TextView mTvStatus, mBtnConnect, mBtnToggleView;
+    private TextView mTvNmea, mTvShiftBanner, mTvLogStatus;
     private ImageView mIvGpsStatus, mIvBleStatus, mIvBleGpsStatus;
-    private TextView mTvNmea;
+    private View mRootView;
 
     private static final int REQUEST_PERMISSIONS = 100;
 
-    // Tracks checked state for menu toggles so onPrepareOptionsMenu
-    // can reflect the real state instead of always resetting to true.
+    // Toggle state for menu checkboxes
     private boolean mShowApparentWind = true;
     private boolean mShowTrueWind     = true;
+    private boolean mNightMode        = false;
 
     // Wind sensor scan
     private final ActivityResultLauncher<Intent> mWindScanLauncher =
-            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
-                    if (address != null) {
-                        mViewModel.connectDevice(address);
-                        saveLastDevice(address);
-                    }
-                }
-            });
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
+                if (address != null) { mViewModel.connectDevice(address); saveLastDevice(address); }
+            }
+        });
 
     // BLE GPS scan
     private final ActivityResultLauncher<Intent> mGpsScanLauncher =
-            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                    String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
-                    String name    = result.getData().getStringExtra(ScanActivity.EXTRA_NAME);
-                    if (address != null) {
-                        mViewModel.connectBleGps(address, name);
-                        saveLastBleGps(address, name);
-                    }
-                }
-            });
+        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
+                String name    = result.getData().getStringExtra(ScanActivity.EXTRA_NAME);
+                if (address != null) { mViewModel.connectBleGps(address, name); saveLastBleGps(address, name); }
+            }
+        });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -83,32 +82,29 @@ public class MainActivity extends AppCompatActivity {
         mViewModel.bindBleService();
 
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        if (prefs.getBoolean("screen_on", true)) {
+        if (prefs.getBoolean("screen_on", true))
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
-        }
+
         String unitPref = prefs.getString("speed_unit", "knots");
-        if ("ms".equals(unitPref))        mViewModel.setSpeedUnit(WindViewModel.UNIT_MS);
-        else if ("kmh".equals(unitPref))  mViewModel.setSpeedUnit(WindViewModel.UNIT_KMH);
-        else                              mViewModel.setSpeedUnit(WindViewModel.UNIT_KNOTS);
+        if ("ms".equals(unitPref))       mViewModel.setSpeedUnit(WindViewModel.UNIT_MS);
+        else if ("kmh".equals(unitPref)) mViewModel.setSpeedUnit(WindViewModel.UNIT_KMH);
+        else                             mViewModel.setSpeedUnit(WindViewModel.UNIT_KNOTS);
 
         bindViews();
         setupListeners();
         observeViewModel();
         checkAndRequestPermissions();
 
-        // Auto-reconnect wind sensor
+        // Auto-reconnect
         String lastWind = getLastDevice();
         if (lastWind != null && !lastWind.isEmpty()) mViewModel.connectDevice(lastWind);
-
-        // Auto-reconnect BLE GPS
         String lastGpsAddr = prefs.getString("last_ble_gps_addr", null);
         String lastGpsName = prefs.getString("last_ble_gps_name", null);
-        if (lastGpsAddr != null && !lastGpsAddr.isEmpty()) {
-            mViewModel.connectBleGps(lastGpsAddr, lastGpsName);
-        }
+        if (lastGpsAddr != null && !lastGpsAddr.isEmpty()) mViewModel.connectBleGps(lastGpsAddr, lastGpsName);
     }
 
     private void bindViews() {
+        mRootView         = findViewById(R.id.rootLayout);
         mCompassView      = findViewById(R.id.windCompassView);
         mTvAws            = findViewById(R.id.tvAws);
         mTvAwa            = findViewById(R.id.tvAwa);
@@ -124,8 +120,10 @@ public class MainActivity extends AppCompatActivity {
         mIvBleGpsStatus   = findViewById(R.id.ivBleGpsStatus);
         mBtnToggleView    = findViewById(R.id.btnToggleView);
         mBtnConnect       = findViewById(R.id.btnConnect);
-
         mTvNmea           = findViewById(R.id.tvNmea);
+        mTvShiftBanner    = findViewById(R.id.tvShiftBanner);
+        mTvLogStatus      = findViewById(R.id.tvLogStatus);
+
         mCompassView.setSpeedFormatter(ms -> mViewModel.formatSpeed(ms));
     }
 
@@ -141,32 +139,28 @@ public class MainActivity extends AppCompatActivity {
             Integer state = mViewModel.getConnectionState().getValue();
             if (state != null && state == BleConstants.STATE_CONNECTED) {
                 new AlertDialog.Builder(this)
-                        .setTitle("Disconnect Wind Sensor")
-                        .setMessage("Disconnect from current wind sensor?")
-                        .setPositiveButton("Disconnect", (d, w) -> mViewModel.disconnectDevice())
-                        .setNegativeButton("Cancel", null)
-                        .show();
-            } else {
-                openWindScan();
-            }
+                    .setTitle("Disconnect Wind Sensor")
+                    .setMessage("Disconnect from current wind sensor?")
+                    .setPositiveButton("Disconnect", (d, w) -> mViewModel.disconnectDevice())
+                    .setNegativeButton("Cancel", null).show();
+            } else { openWindScan(); }
         });
 
-        // BLE GPS icon tap — toggle connect/disconnect
         mIvBleGpsStatus.setOnClickListener(v -> {
             Integer gpsState = mViewModel.getBleGpsState().getValue();
             if (gpsState != null && gpsState == BluetoothProfile.STATE_CONNECTED) {
                 new AlertDialog.Builder(this)
-                        .setTitle("BLE GPS")
-                        .setMessage("Disconnect BLE GPS and use phone GPS?")
-                        .setPositiveButton("Disconnect", (d, w) -> {
-                            mViewModel.disconnectBleGps();
-                            saveLastBleGps("", "");
-                        })
-                        .setNegativeButton("Cancel", null)
-                        .show();
-            } else {
-                openGpsScan();
-            }
+                    .setTitle("BLE GPS")
+                    .setMessage("Disconnect BLE GPS and use phone GPS?")
+                    .setPositiveButton("Disconnect", (d, w) -> { mViewModel.disconnectBleGps(); saveLastBleGps("", ""); })
+                    .setNegativeButton("Cancel", null).show();
+            } else { openGpsScan(); }
+        });
+
+        // Tap shift banner to reset baseline
+        mTvShiftBanner.setOnClickListener(v -> {
+            mViewModel.resetShiftBaseline();
+            mTvShiftBanner.setVisibility(View.GONE);
         });
     }
 
@@ -212,44 +206,191 @@ public class MainActivity extends AppCompatActivity {
         });
 
         mViewModel.getGpsAvailable().observe(this, available ->
-                mIvGpsStatus.setImageResource(available ? R.drawable.ic_gps_on : R.drawable.ic_gps_off));
+            mIvGpsStatus.setImageResource(available ? R.drawable.ic_gps_on : R.drawable.ic_gps_off));
 
         mViewModel.getBleGpsState().observe(this, state -> {
             switch (state) {
                 case BluetoothProfile.STATE_CONNECTED:
                     mIvBleGpsStatus.setImageResource(R.drawable.ic_ble_gps_on);
-                    mIvBleGpsStatus.setColorFilter(
-                            getResources().getColor(R.color.color_connected));
-                    mTvNmea.setVisibility(android.view.View.VISIBLE);
+                    mIvBleGpsStatus.setColorFilter(getResources().getColor(R.color.color_connected));
+                    mTvNmea.setVisibility(View.VISIBLE);
                     break;
                 case BluetoothProfile.STATE_CONNECTING:
                     mIvBleGpsStatus.setImageResource(R.drawable.ic_ble_gps_on);
-                    mIvBleGpsStatus.setColorFilter(
-                            getResources().getColor(R.color.color_connecting));
-                    mTvNmea.setText("Connecting to BLE GPS…");
-                    mTvNmea.setVisibility(android.view.View.VISIBLE);
+                    mIvBleGpsStatus.setColorFilter(getResources().getColor(R.color.color_connecting));
+                    mTvNmea.setText("Connecting to BLE GPS\u2026");
+                    mTvNmea.setVisibility(View.VISIBLE);
                     break;
                 default:
                     mIvBleGpsStatus.setImageResource(R.drawable.ic_ble_gps_off);
                     mIvBleGpsStatus.clearColorFilter();
-                    mTvNmea.setVisibility(android.view.View.GONE);
+                    mTvNmea.setVisibility(View.GONE);
                     break;
             }
         });
 
         mViewModel.getLastNmea().observe(this, nmea -> {
-            if (nmea != null && !nmea.isEmpty() && mTvNmea.getVisibility() == android.view.View.VISIBLE) {
+            if (nmea != null && !nmea.isEmpty() && mTvNmea.getVisibility() == View.VISIBLE)
                 mTvNmea.setText(nmea);
-            }
         });
 
-        mViewModel.getGpsSource().observe(this, source -> {
-            // SOG label shows "GPS" vs "BLE GPS" source
-            if (mTvSog != null) {
-                // label updated via wind data, just keep UI in sync
-            }
+        // Trip logging row count
+        mViewModel.getLogRowCount().observe(this, rows -> {
+            if (mViewModel.isLogging())
+                mTvLogStatus.setText(String.format("● REC  %d pts", rows));
         });
+        mViewModel.getLogging().observe(this, logging -> {
+            mTvLogStatus.setVisibility(logging ? View.VISIBLE : View.GONE);
+            if (!logging) mTvLogStatus.setText("");
+            invalidateOptionsMenu(); // refresh menu item label
+        });
+
+        // Wind shift events
+        mViewModel.getShiftEvent().observe(this, event -> {
+            if (event == null) return;
+            boolean isLift = event.type == WindShiftAlert.ShiftType.LIFT;
+            String msg = String.format("%s  %+.0f°  TWD %.0f°",
+                    isLift ? "▲ LIFT" : "▼ HEADER", event.shiftDeg, event.newTwd);
+            mTvShiftBanner.setText(msg);
+            mTvShiftBanner.setTextColor(getResources().getColor(
+                    isLift ? R.color.color_connected : R.color.color_disconnected));
+            mTvShiftBanner.setVisibility(View.VISIBLE);
+            // Auto-hide after 8 s
+            mTvShiftBanner.removeCallbacks(mHideShiftBanner);
+            mTvShiftBanner.postDelayed(mHideShiftBanner, 8000);
+        });
+
+        // Night mode
+        mViewModel.getNightMode().observe(this, this::applyNightMode);
     }
+
+    private final Runnable mHideShiftBanner = () -> mTvShiftBanner.setVisibility(View.GONE);
+
+    // ---- Night mode ----
+
+    private void applyNightMode(boolean night) {
+        mNightMode = night;
+        if (night) {
+            // Red-tint everything using a color matrix
+            ColorMatrix cm = new ColorMatrix(new float[]{
+                0.299f, 0.587f, 0.114f, 0, 0,   // R = luminance
+                0,      0,      0,      0, 0,   // G = 0
+                0,      0,      0,      0, 0,   // B = 0
+                0,      0,      0,      1, 0    // A = unchanged
+            });
+            // Boost red channel
+            ColorMatrix red = new ColorMatrix(new float[]{
+                1.2f, 0, 0, 0, 20,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0,
+                0, 0, 0, 1, 0
+            });
+            red.preConcat(cm);
+            ColorMatrixColorFilter filter = new ColorMatrixColorFilter(red);
+            mRootView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
+            android.graphics.Paint paint = new android.graphics.Paint();
+            paint.setColorFilter(filter);
+            mRootView.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
+            getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            mRootView.setLayerType(View.LAYER_TYPE_NONE, null);
+        }
+        invalidateOptionsMenu();
+    }
+
+    // ---- Menu ----
+
+    @Override
+    public boolean onCreateOptionsMenu(Menu menu) {
+        getMenuInflater().inflate(R.menu.menu_main, menu);
+        return true;
+    }
+
+    @Override
+    public boolean onPrepareOptionsMenu(Menu menu) {
+        MenuItem apparent   = menu.findItem(R.id.action_show_apparent);
+        MenuItem trueWind   = menu.findItem(R.id.action_show_true);
+        MenuItem nightMode  = menu.findItem(R.id.action_night_mode);
+        MenuItem shiftAlert = menu.findItem(R.id.action_shift_alert);
+        MenuItem logging    = menu.findItem(R.id.action_log_trip);
+
+        if (apparent   != null) apparent.setChecked(mShowApparentWind);
+        if (trueWind   != null) trueWind.setChecked(mShowTrueWind);
+        if (nightMode  != null) nightMode.setChecked(mNightMode);
+        if (shiftAlert != null) shiftAlert.setChecked(
+                Boolean.TRUE.equals(mViewModel.getShiftAlertOn().getValue()));
+        if (logging    != null) logging.setTitle(
+                mViewModel.isLogging() ? "Stop Recording" : "Start Recording");
+
+        return super.onPrepareOptionsMenu(menu);
+    }
+
+    @Override
+    public boolean onOptionsItemSelected(MenuItem item) {
+        int id = item.getItemId();
+        if (id == R.id.action_show_apparent) {
+            mShowApparentWind = !mShowApparentWind;
+            item.setChecked(mShowApparentWind);
+            mCompassView.setShowApparentWind(mShowApparentWind);
+            return true;
+        } else if (id == R.id.action_show_true) {
+            mShowTrueWind = !mShowTrueWind;
+            item.setChecked(mShowTrueWind);
+            mCompassView.setShowTrueWind(mShowTrueWind);
+            return true;
+        } else if (id == R.id.action_night_mode) {
+            boolean newVal = !mNightMode;
+            mViewModel.setNightMode(newVal);
+            return true;
+        } else if (id == R.id.action_shift_alert) {
+            boolean current = Boolean.TRUE.equals(mViewModel.getShiftAlertOn().getValue());
+            if (!current) showShiftThresholdDialog();
+            else          mViewModel.setShiftAlertEnabled(false);
+            return true;
+        } else if (id == R.id.action_log_trip) {
+            if (mViewModel.isLogging()) {
+                mViewModel.stopLogging();
+                Toast.makeText(this, "Recording saved", Toast.LENGTH_SHORT).show();
+            } else {
+                mViewModel.startLogging();
+                Toast.makeText(this, "Recording started", Toast.LENGTH_SHORT).show();
+            }
+            return true;
+        } else if (id == R.id.action_large_number) {
+            startActivity(new Intent(this, LargeNumberActivity.class));
+            return true;
+        } else if (id == R.id.action_add_ble_gps) {
+            openGpsScan();
+            return true;
+        } else if (id == R.id.action_settings) {
+            startActivity(new Intent(this, SettingsActivity.class));
+            return true;
+        }
+        return super.onOptionsItemSelected(item);
+    }
+
+    private void showShiftThresholdDialog() {
+        float current = mViewModel.getShiftAlert().getThreshold();
+        String[] options = {"5°", "10°", "15°", "20°"};
+        float[] values   = {5f,   10f,   15f,   20f};
+        int selected = 1; // default 10°
+        for (int i = 0; i < values.length; i++) if (values[i] == current) { selected = i; break; }
+
+        final int[] choice = {selected};
+        new AlertDialog.Builder(this)
+            .setTitle("Wind Shift Threshold")
+            .setSingleChoiceItems(options, selected, (d, w) -> choice[0] = w)
+            .setPositiveButton("Enable", (d, w) -> {
+                mViewModel.setShiftThreshold(values[choice[0]]);
+                mViewModel.setShiftAlertEnabled(true);
+                Toast.makeText(this,
+                        "Shift alert on: ≥" + options[choice[0]], Toast.LENGTH_SHORT).show();
+            })
+            .setNegativeButton("Cancel", null)
+            .show();
+    }
+
+    // ---- Navigation ----
 
     private void openWindScan() {
         if (!checkBluetoothEnabled()) return;
@@ -275,46 +416,6 @@ public class MainActivity extends AppCompatActivity {
         return true;
     }
 
-    // ---- Menu ----
-
-    @Override
-    public boolean onCreateOptionsMenu(Menu menu) {
-        getMenuInflater().inflate(R.menu.menu_main, menu);
-        return true;
-    }
-
-    @Override
-    public boolean onPrepareOptionsMenu(Menu menu) {
-        MenuItem apparent = menu.findItem(R.id.action_show_apparent);
-        MenuItem trueWind = menu.findItem(R.id.action_show_true);
-        if (apparent != null) apparent.setChecked(mShowApparentWind);
-        if (trueWind  != null) trueWind.setChecked(mShowTrueWind);
-        return super.onPrepareOptionsMenu(menu);
-    }
-
-    @Override
-    public boolean onOptionsItemSelected(MenuItem item) {
-        int id = item.getItemId();
-        if (id == R.id.action_settings) {
-            startActivity(new Intent(this, SettingsActivity.class));
-            return true;
-        } else if (id == R.id.action_show_apparent) {
-            mShowApparentWind = !mShowApparentWind;
-            item.setChecked(mShowApparentWind);
-            mCompassView.setShowApparentWind(mShowApparentWind);
-            return true;
-        } else if (id == R.id.action_show_true) {
-            mShowTrueWind = !mShowTrueWind;
-            item.setChecked(mShowTrueWind);
-            mCompassView.setShowTrueWind(mShowTrueWind);
-            return true;
-        } else if (id == R.id.action_add_ble_gps) {
-            openGpsScan();
-            return true;
-        }
-        return super.onOptionsItemSelected(item);
-    }
-
     // ---- Permissions ----
 
     private void checkAndRequestPermissions() {
@@ -327,6 +428,10 @@ public class MainActivity extends AppCompatActivity {
         }
         if (ActivityCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED)
             needed.add(Manifest.permission.ACCESS_FINE_LOCATION);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED)
+                needed.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
         if (!needed.isEmpty())
             ActivityCompat.requestPermissions(this, needed.toArray(new String[0]), REQUEST_PERMISSIONS);
     }
@@ -341,19 +446,15 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveLastDevice(String address) {
         PreferenceManager.getDefaultSharedPreferences(this)
-                .edit().putString("last_device", address).apply();
+            .edit().putString("last_device", address).apply();
     }
-
     private String getLastDevice() {
-        return PreferenceManager.getDefaultSharedPreferences(this)
-                .getString("last_device", null);
+        return PreferenceManager.getDefaultSharedPreferences(this).getString("last_device", null);
     }
-
     private void saveLastBleGps(String address, String name) {
         PreferenceManager.getDefaultSharedPreferences(this).edit()
-                .putString("last_ble_gps_addr", address)
-                .putString("last_ble_gps_name", name)
-                .apply();
+            .putString("last_ble_gps_addr", address)
+            .putString("last_ble_gps_name", name).apply();
     }
 
     @Override

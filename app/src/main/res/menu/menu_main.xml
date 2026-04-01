@@ -16,8 +16,25 @@
         android:checked="true"
         app:showAsAction="never"/>
 
-    <item
-        android:id="@+id/action_add_ble_gps"
+    <item android:id="@+id/action_night_mode"
+        android:title="@string/action_night_mode"
+        android:checkable="true"
+        app:showAsAction="never"/>
+
+    <item android:id="@+id/action_large_number"
+        android:title="@string/action_large_number"
+        app:showAsAction="never"/>
+
+    <item android:id="@+id/action_shift_alert"
+        android:title="@string/action_shift_alert"
+        android:checkable="true"
+        app:showAsAction="never"/>
+
+    <item android:id="@+id/action_log_trip"
+        android:title="@string/action_log_trip"
+        app:showAsAction="never"/>
+
+    <item android:id="@+id/action_add_ble_gps"
         android:title="@string/action_add_ble_gps"
         app:showAsAction="never"/>
 

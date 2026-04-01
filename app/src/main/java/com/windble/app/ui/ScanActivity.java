@@ -14,6 +14,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.util.Log;
 import android.view.LayoutInflater;
 import android.view.MenuItem;
 import android.view.View;
@@ -36,6 +37,8 @@ import java.util.List;
 import java.util.Set;
 
 public class ScanActivity extends AppCompatActivity {
+
+    private static final String TAG = "ScanActivity";
 
     public static final String EXTRA_SCAN_MODE = "scan_mode";
     public static final String EXTRA_ADDRESS   = "device_address";
@@ -115,12 +118,6 @@ public class ScanActivity extends AppCompatActivity {
             return;
         }
 
-        mScanner = mAdapter.getBluetoothLeScanner();
-        if (mScanner == null) {
-            Toast.makeText(this, "BLE scanner not available", Toast.LENGTH_SHORT).show();
-            return;
-        }
-
         mDevices.clear(); mSeen.clear();
         mDeviceAdapter.notifyDataSetChanged();
         mScanning = true;
@@ -129,11 +126,31 @@ public class ScanActivity extends AppCompatActivity {
                 ? "Scanning for BLE GPS devices\u2026"
                 : getString(R.string.scanning));
 
-        try { mScanner.startScan(mScanCallback); }
-        catch (SecurityException e) {
-            Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
-            return;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            mScanner = mAdapter.getBluetoothLeScanner();
+            if (mScanner == null) {
+                Toast.makeText(this, "BLE scanner not available", Toast.LENGTH_SHORT).show();
+                mScanning = false;
+                mProgressBar.setVisibility(View.GONE);
+                return;
+            }
+            try {
+                mScanner.startScan(mScanCallback);
+            } catch (SecurityException e) {
+                Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
+                return;
+            }
+        } else {
+            // Legacy API for Android 4.4.4
+            try {
+                //noinspection deprecation
+                mAdapter.startLeScan(mLeScanCallback);
+            } catch (SecurityException e) {
+                Toast.makeText(this, "Permission denied", Toast.LENGTH_SHORT).show();
+                return;
+            }
         }
+        
         mHandler.postDelayed(this::stopScan, SCAN_PERIOD_MS);
     }
 
@@ -144,23 +161,23 @@ public class ScanActivity extends AppCompatActivity {
         mTvScanStatus.setText(mDevices.isEmpty()
                 ? getString(R.string.no_devices)
                 : getString(R.string.tap_to_connect));
-        try { if (mScanner != null) mScanner.stopScan(mScanCallback); }
-        catch (SecurityException ignored) {}
+        
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            try { if (mScanner != null) mScanner.stopScan(mScanCallback); }
+            catch (SecurityException ignored) {}
+        } else {
+            try {
+                //noinspection deprecation
+                mAdapter.stopLeScan(mLeScanCallback);
+            } catch (SecurityException ignored) {}
+        }
     }
 
-    private final ScanCallback mScanCallback = new ScanCallback() {
+    private final ScanCallback mScanCallback = (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) ? new ScanCallback() {
         @Override
         public void onScanResult(int callbackType, ScanResult result) {
             BluetoothDevice device = result.getDevice();
-            String address = device.getAddress();
-            if (mSeen.contains(address)) return;
-            mSeen.add(address);
-            String name;
-            try { name = device.getName(); } catch (SecurityException e) { name = null; }
-            if (name == null || name.isEmpty()) name = "Unknown (" + address + ")";
-            mDevices.add(new ScannedDevice(name, address, result.getRssi()));
-            final int pos = mDevices.size() - 1;
-            runOnUiThread(() -> mDeviceAdapter.notifyItemInserted(pos));
+            addDevice(device, result.getRssi());
         }
         @Override
         public void onScanFailed(int errorCode) {
@@ -169,7 +186,29 @@ public class ScanActivity extends AppCompatActivity {
                 mProgressBar.setVisibility(View.GONE);
             });
         }
+    } : null;
+
+    private final BluetoothAdapter.LeScanCallback mLeScanCallback = new BluetoothAdapter.LeScanCallback() {
+        @Override
+        public void onLeScan(BluetoothDevice device, int rssi, byte[] scanRecord) {
+            addDevice(device, rssi);
+        }
     };
+
+    private void addDevice(BluetoothDevice device, int rssi) {
+        String address = device.getAddress();
+        if (mSeen.contains(address)) return;
+        mSeen.add(address);
+        String name;
+        try { name = device.getName(); } catch (SecurityException e) { name = null; }
+        if (name == null || name.isEmpty()) name = "Unknown (" + address + ")";
+        
+        String finalName = name;
+        runOnUiThread(() -> {
+            mDevices.add(new ScannedDevice(finalName, address, rssi));
+            mDeviceAdapter.notifyItemInserted(mDevices.size() - 1);
+        });
+    }
 
     @Override
     public boolean onOptionsItemSelected(MenuItem item) {

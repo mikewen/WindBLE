@@ -2,6 +2,7 @@
 <androidx.constraintlayout.widget.ConstraintLayout
     xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/rootLayout"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@color/bg_dark">
@@ -213,6 +214,37 @@
             </LinearLayout>
 
         </LinearLayout>
+
+        <!-- Wind shift banner (tap to dismiss / reset baseline) -->
+        <TextView
+            android:id="@+id/tvShiftBanner"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="4dp"
+            android:padding="6dp"
+            android:text=""
+            android:textColor="@color/color_connected"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:background="@drawable/bg_data_card"
+            android:clickable="true"
+            android:focusable="true"
+            android:visibility="gone"/>
+
+        <!-- Recording status row -->
+        <TextView
+            android:id="@+id/tvLogStatus"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="4dp"
+            android:text=""
+            android:textColor="#FFFF5252"
+            android:textSize="11sp"
+            android:fontFamily="monospace"
+            android:gravity="center"
+            android:visibility="gone"/>
 
         <!-- NMEA debug row (BLE GPS raw sentence) -->
         <TextView

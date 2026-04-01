@@ -34,4 +34,11 @@
         <item name="android:text">--</item>
     </style>
 
+
+    <style name="Theme.WindBLE.Fullscreen" parent="Theme.WindBLE">
+        <item name="windowActionBar">false</item>
+        <item name="windowNoTitle">true</item>
+        <item name="android:windowFullscreen">true</item>
+    </style>
+
 </resources>

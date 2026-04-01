@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:id="@+id/largeNumberRoot"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/bg_dark"
+    android:clickable="true"
+    android:focusable="true">
+
+    <!-- Field label (e.g. "TWA") -->
+    <TextView
+        android:id="@+id/tvLargeLabel"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TWA"
+        android:textSize="28sp"
+        android:textStyle="bold"
+        android:fontFamily="sans-serif-condensed"
+        android:letterSpacing="0.15"
+        android:textColor="#99FF6B35"
+        app:layout_constraintBottom_toTopOf="@id/tvLargeValue"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="8dp"/>
+
+    <!-- The giant number -->
+    <TextView
+        android:id="@+id/tvLargeValue"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="---"
+        android:textSize="160sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:textColor="#FFFF6B35"
+        android:includeFontPadding="false"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"/>
+
+    <!-- Unit label (e.g. "°" or "kt") -->
+    <TextView
+        android:id="@+id/tvLargeUnit"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="°"
+        android:textSize="36sp"
+        android:fontFamily="sans-serif-condensed"
+        android:textColor="#88FFFFFF"
+        app:layout_constraintTop_toBottomOf="@id/tvLargeValue"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginTop="0dp"/>
+
+    <!-- Wind shift event badge -->
+    <TextView
+        android:id="@+id/tvShiftBadge"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:padding="12dp"
+        android:textSize="20sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        android:textColor="#FF4CAF50"
+        android:background="@drawable/bg_data_card"
+        android:visibility="invisible"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="40dp"/>
+
+    <!-- Hint -->
+    <TextView
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="TAP to cycle  •  HOLD to exit"
+        android:textSize="11sp"
+        android:textColor="#33FFFFFF"
+        android:fontFamily="sans-serif-condensed"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent"
+        android:layout_marginBottom="12dp"/>
+
+</androidx.constraintlayout.widget.ConstraintLayout>
