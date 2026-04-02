@@ -31,29 +31,40 @@ public class WindData {
 
     /**
      * Parse a 7-byte BLE notification packet.
-     * Byte 0: 'W' (0x57)
-     * Byte 1: flags
-     * Byte 2-3: AWS uint16, m/s * 100
-     * Byte 4-5: AWA uint16, deg * 100
-     * Byte 6: XOR checksum (bytes 0-5)
+     * Byte 0: 'W' (0x57)  — frame ID
+     * Byte 1: flags        — bit 0 = valid fix
+     * Byte 2-3: AWS uint16 big-endian, m/s * 100
+     * Byte 4-5: AWA uint16 big-endian, deg * 100
+     * Byte 6: XOR checksum of bytes 0-5
      */
     public static WindData fromBytes(byte[] data) {
         if (data == null || data.length < 7) return null;
 
-        // Validate magic byte
+        // Validate frame ID
         if ((data[0] & 0xFF) != 0x57) return null;
 
-        // Validate checksum
+        // Validate XOR checksum
         byte xor = 0;
         for (int i = 0; i < 6; i++) xor ^= data[i];
         if (xor != data[6]) return null;
 
-        WindData wd = new WindData();
+        // Check valid flag (bit 0 of flags byte)
+        int flags = data[1] & 0xFF;
+        if ((flags & 0x01) == 0) return null;   // sensor reports no valid data
+
+        // Decode uint16 big-endian
         int awsRaw = ((data[2] & 0xFF) << 8) | (data[3] & 0xFF);
         int awaRaw = ((data[4] & 0xFF) << 8) | (data[5] & 0xFF);
 
-        wd.aws = awsRaw / 100.0f;
-        wd.awa = awaRaw / 100.0f;
+        WindData wd = new WindData();
+        wd.aws = awsRaw / 100.0f;                // m/s
+
+        // Normalise AWA to [0, 360) using modulo — handles any raw value correctly
+        float awa = awaRaw / 100.0f;
+        awa = awa % 360.0f;
+        if (awa < 0) awa += 360.0f;             // shouldn't happen (uint), but be safe
+        wd.awa = awa;
+
         wd.valid = true;
         return wd;
     }

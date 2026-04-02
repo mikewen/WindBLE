@@ -34,6 +34,15 @@
         android:title="@string/action_log_trip"
         app:showAsAction="never"/>
 
+    <item android:id="@+id/action_web_server_toggle"
+        android:title="@string/action_web_server_toggle"
+        android:checkable="true"
+        app:showAsAction="never"/>
+
+    <item android:id="@+id/action_server_url"
+        android:title="@string/action_server_url"
+        app:showAsAction="never"/>
+
     <item android:id="@+id/action_add_ble_gps"
         android:title="@string/action_add_ble_gps"
         app:showAsAction="never"/>

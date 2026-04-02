@@ -24,6 +24,7 @@ import androidx.lifecycle.MutableLiveData;
 import androidx.preference.PreferenceManager;
 
 import com.windble.app.alert.WindShiftAlert;
+import com.windble.app.server.WindHttpServer;
 import com.windble.app.ble.BleConstants;
 import com.windble.app.ble.BleService;
 import com.windble.app.gps.BleGpsManager;
@@ -89,6 +90,9 @@ public class WindViewModel extends AndroidViewModel {
     // --- Trip logger ---
     private final TripLogger mTripLogger;
 
+    // --- HTTP server ---
+    private final WindHttpServer mHttpServer;
+
     // --- Wind shift alert ---
     private final WindShiftAlert mShiftAlert;
 
@@ -111,10 +115,14 @@ public class WindViewModel extends AndroidViewModel {
             }
         });
 
+        // HTTP server (starts only when enabled by user)
+        mHttpServer = new WindHttpServer(app);
+
         // Wind shift alert
         mShiftAlert = new WindShiftAlert(app);
         mShiftAlert.setListener((shiftDeg, type, newTwd) -> {
             mShiftEvent.postValue(new ShiftEvent(shiftDeg, type, newTwd));
+            if (mHttpServer.isRunning()) mHttpServer.pushShiftEvent(shiftDeg, type.name(), newTwd);
         });
 
         // Phone GPS
@@ -228,10 +236,9 @@ public class WindViewModel extends AndroidViewModel {
     private void processPacket(byte[] raw) {
         WindData wd = WindData.fromBytes(raw);
         if (wd == null) return;
-        float awa = wd.awa % 360;
         wd.sog = mSog; wd.cog = mCog; wd.heading = mHeading;
         wd.hasGps = Boolean.TRUE.equals(mGpsAvailable.getValue());
-        wd.calculateTrueWind(awa, wd.aws, mSog, mHeading);
+        wd.calculateTrueWind(wd.awa, wd.aws, mSog, mHeading);
         wd.valid = true;
 
         // Feed subsystems
@@ -239,6 +246,7 @@ public class WindViewModel extends AndroidViewModel {
         mTripLogger.log(wd);
         if (mTripLogger.isLogging()) mLogRowCount.postValue(mTripLogger.getRowCount());
 
+        if (mHttpServer.isRunning()) mHttpServer.pushWindData(wd, formatSpeedUnit());
         mWindData.postValue(wd);
     }
 
@@ -319,6 +327,14 @@ public class WindViewModel extends AndroidViewModel {
     public int  getSpeedUnit() { return mSpeedUnit; }
     public void setSpeedUnit(int unit) { mSpeedUnit = unit; }
 
+    public String formatSpeedUnit() {
+        switch (mSpeedUnit) {
+            case UNIT_MS:  return "m/s";
+            case UNIT_KMH: return "km/h";
+            default:       return "kt";
+        }
+    }
+
     public String formatSpeed(float ms) {
         switch (mSpeedUnit) {
             case UNIT_MS:  return String.format("%.1f m/s", ms);
@@ -328,6 +344,11 @@ public class WindViewModel extends AndroidViewModel {
     }
 
     // ---- LiveData getters ----
+
+    public WindHttpServer getHttpServer() { return mHttpServer; }
+    public void startWebServer()  { mHttpServer.start(); }
+    public void stopWebServer()   { mHttpServer.stop(); }
+    public boolean isWebServerRunning() { return mHttpServer.isRunning(); }
 
     public LiveData<WindData>   getWindData()        { return mWindData; }
     public LiveData<Integer>    getConnectionState() { return mConnectionState; }

@@ -5,6 +5,8 @@ import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothManager;
 import android.bluetooth.BluetoothProfile;
 import android.content.Context;
+import android.content.ClipData;
+import android.content.ClipboardManager;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
@@ -56,22 +58,22 @@ public class MainActivity extends AppCompatActivity {
 
     // Wind sensor scan
     private final ActivityResultLauncher<Intent> mWindScanLauncher =
-        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
-                if (address != null) { mViewModel.connectDevice(address); saveLastDevice(address); }
-            }
-        });
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
+                    if (address != null) { mViewModel.connectDevice(address); saveLastDevice(address); }
+                }
+            });
 
     // BLE GPS scan
     private final ActivityResultLauncher<Intent> mGpsScanLauncher =
-        registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
-            if (result.getResultCode() == RESULT_OK && result.getData() != null) {
-                String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
-                String name    = result.getData().getStringExtra(ScanActivity.EXTRA_NAME);
-                if (address != null) { mViewModel.connectBleGps(address, name); saveLastBleGps(address, name); }
-            }
-        });
+            registerForActivityResult(new ActivityResultContracts.StartActivityForResult(), result -> {
+                if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                    String address = result.getData().getStringExtra(ScanActivity.EXTRA_ADDRESS);
+                    String name    = result.getData().getStringExtra(ScanActivity.EXTRA_NAME);
+                    if (address != null) { mViewModel.connectBleGps(address, name); saveLastBleGps(address, name); }
+                }
+            });
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -139,10 +141,10 @@ public class MainActivity extends AppCompatActivity {
             Integer state = mViewModel.getConnectionState().getValue();
             if (state != null && state == BleConstants.STATE_CONNECTED) {
                 new AlertDialog.Builder(this)
-                    .setTitle("Disconnect Wind Sensor")
-                    .setMessage("Disconnect from current wind sensor?")
-                    .setPositiveButton("Disconnect", (d, w) -> mViewModel.disconnectDevice())
-                    .setNegativeButton("Cancel", null).show();
+                        .setTitle("Disconnect Wind Sensor")
+                        .setMessage("Disconnect from current wind sensor?")
+                        .setPositiveButton("Disconnect", (d, w) -> mViewModel.disconnectDevice())
+                        .setNegativeButton("Cancel", null).show();
             } else { openWindScan(); }
         });
 
@@ -150,10 +152,10 @@ public class MainActivity extends AppCompatActivity {
             Integer gpsState = mViewModel.getBleGpsState().getValue();
             if (gpsState != null && gpsState == BluetoothProfile.STATE_CONNECTED) {
                 new AlertDialog.Builder(this)
-                    .setTitle("BLE GPS")
-                    .setMessage("Disconnect BLE GPS and use phone GPS?")
-                    .setPositiveButton("Disconnect", (d, w) -> { mViewModel.disconnectBleGps(); saveLastBleGps("", ""); })
-                    .setNegativeButton("Cancel", null).show();
+                        .setTitle("BLE GPS")
+                        .setMessage("Disconnect BLE GPS and use phone GPS?")
+                        .setPositiveButton("Disconnect", (d, w) -> { mViewModel.disconnectBleGps(); saveLastBleGps("", ""); })
+                        .setNegativeButton("Cancel", null).show();
             } else { openGpsScan(); }
         });
 
@@ -206,7 +208,7 @@ public class MainActivity extends AppCompatActivity {
         });
 
         mViewModel.getGpsAvailable().observe(this, available ->
-            mIvGpsStatus.setImageResource(available ? R.drawable.ic_gps_on : R.drawable.ic_gps_off));
+                mIvGpsStatus.setImageResource(available ? R.drawable.ic_gps_on : R.drawable.ic_gps_off));
 
         mViewModel.getBleGpsState().observe(this, state -> {
             switch (state) {
@@ -273,17 +275,17 @@ public class MainActivity extends AppCompatActivity {
         if (night) {
             // Red-tint everything using a color matrix
             ColorMatrix cm = new ColorMatrix(new float[]{
-                0.299f, 0.587f, 0.114f, 0, 0,   // R = luminance
-                0,      0,      0,      0, 0,   // G = 0
-                0,      0,      0,      0, 0,   // B = 0
-                0,      0,      0,      1, 0    // A = unchanged
+                    0.299f, 0.587f, 0.114f, 0, 0,   // R = luminance
+                    0,      0,      0,      0, 0,   // G = 0
+                    0,      0,      0,      0, 0,   // B = 0
+                    0,      0,      0,      1, 0    // A = unchanged
             });
             // Boost red channel
             ColorMatrix red = new ColorMatrix(new float[]{
-                1.2f, 0, 0, 0, 20,
-                0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0,
-                0, 0, 0, 1, 0
+                    1.2f, 0, 0, 0, 20,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 0, 0,
+                    0, 0, 0, 1, 0
             });
             red.preConcat(cm);
             ColorMatrixColorFilter filter = new ColorMatrixColorFilter(red);
@@ -313,6 +315,7 @@ public class MainActivity extends AppCompatActivity {
         MenuItem nightMode  = menu.findItem(R.id.action_night_mode);
         MenuItem shiftAlert = menu.findItem(R.id.action_shift_alert);
         MenuItem logging    = menu.findItem(R.id.action_log_trip);
+        MenuItem webServer  = menu.findItem(R.id.action_web_server_toggle);
 
         if (apparent   != null) apparent.setChecked(mShowApparentWind);
         if (trueWind   != null) trueWind.setChecked(mShowTrueWind);
@@ -321,6 +324,7 @@ public class MainActivity extends AppCompatActivity {
                 Boolean.TRUE.equals(mViewModel.getShiftAlertOn().getValue()));
         if (logging    != null) logging.setTitle(
                 mViewModel.isLogging() ? "Stop Recording" : "Start Recording");
+        if (webServer  != null) webServer.setChecked(mViewModel.isWebServerRunning());
 
         return super.onPrepareOptionsMenu(menu);
     }
@@ -362,6 +366,12 @@ public class MainActivity extends AppCompatActivity {
         } else if (id == R.id.action_add_ble_gps) {
             openGpsScan();
             return true;
+        } else if (id == R.id.action_web_server_toggle) {
+            toggleWebServer();
+            return true;
+        } else if (id == R.id.action_server_url) {
+            showServerUrlDialog();
+            return true;
         } else if (id == R.id.action_settings) {
             startActivity(new Intent(this, SettingsActivity.class));
             return true;
@@ -378,16 +388,16 @@ public class MainActivity extends AppCompatActivity {
 
         final int[] choice = {selected};
         new AlertDialog.Builder(this)
-            .setTitle("Wind Shift Threshold")
-            .setSingleChoiceItems(options, selected, (d, w) -> choice[0] = w)
-            .setPositiveButton("Enable", (d, w) -> {
-                mViewModel.setShiftThreshold(values[choice[0]]);
-                mViewModel.setShiftAlertEnabled(true);
-                Toast.makeText(this,
-                        "Shift alert on: ≥" + options[choice[0]], Toast.LENGTH_SHORT).show();
-            })
-            .setNegativeButton("Cancel", null)
-            .show();
+                .setTitle("Wind Shift Threshold")
+                .setSingleChoiceItems(options, selected, (d, w) -> choice[0] = w)
+                .setPositiveButton("Enable", (d, w) -> {
+                    mViewModel.setShiftThreshold(values[choice[0]]);
+                    mViewModel.setShiftAlertEnabled(true);
+                    Toast.makeText(this,
+                            "Shift alert on: ≥" + options[choice[0]], Toast.LENGTH_SHORT).show();
+                })
+                .setNegativeButton("Cancel", null)
+                .show();
     }
 
     // ---- Navigation ----
@@ -446,15 +456,53 @@ public class MainActivity extends AppCompatActivity {
 
     private void saveLastDevice(String address) {
         PreferenceManager.getDefaultSharedPreferences(this)
-            .edit().putString("last_device", address).apply();
+                .edit().putString("last_device", address).apply();
     }
     private String getLastDevice() {
         return PreferenceManager.getDefaultSharedPreferences(this).getString("last_device", null);
     }
     private void saveLastBleGps(String address, String name) {
         PreferenceManager.getDefaultSharedPreferences(this).edit()
-            .putString("last_ble_gps_addr", address)
-            .putString("last_ble_gps_name", name).apply();
+                .putString("last_ble_gps_addr", address)
+                .putString("last_ble_gps_name", name).apply();
+    }
+
+    private void toggleWebServer() {
+        if (mViewModel.isWebServerRunning()) {
+            mViewModel.stopWebServer();
+            Toast.makeText(this, "WiFi server stopped", Toast.LENGTH_SHORT).show();
+        } else {
+            mViewModel.startWebServer();
+            // Small delay so the server thread has time to bind the socket
+            // before we read the IP address for the dialog
+            new android.os.Handler(android.os.Looper.getMainLooper())
+                    .postDelayed(() -> {
+                        if (!isFinishing() && !isDestroyed()) {
+                            showServerUrlDialog();
+                            invalidateOptionsMenu(); // refresh checkbox after server starts
+                        }
+                    }, 300);
+        }
+        invalidateOptionsMenu();
+    }
+
+    private void showServerUrlDialog() {
+        String ip  = mViewModel.getHttpServer().getWifiIpAddress();
+        String url = "http://" + ip + ":" + com.windble.app.server.WindHttpServer.PORT + "/";
+        new AlertDialog.Builder(this)
+                .setTitle("WiFi Wind Display")
+                .setMessage("Open on any device on the same WiFi:\n\n" + url
+                        + "\n\nAdd ?mode=ink for e-ink / Kindle.")
+                .setPositiveButton("Copy URL", (d, w) -> {
+                    android.content.ClipboardManager cm =
+                            (android.content.ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+                    if (cm != null) {
+                        cm.setPrimaryClip(android.content.ClipData.newPlainText("url", url));
+                        Toast.makeText(this, "Copied: " + url, Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setNegativeButton("Close", null)
+                .show();
     }
 
     @Override
