@@ -19,7 +19,6 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.util.Log;
 
-import java.util.Arrays;
 import java.util.UUID;
 
 public class BleService extends Service {
@@ -27,14 +26,16 @@ public class BleService extends Service {
 
     private BluetoothAdapter mBluetoothAdapter;
     private BluetoothGatt mBluetoothGatt;
-    private int mConnectionState = BleConstants.STATE_DISCONNECTED;
+    private volatile int mConnectionState = BleConstants.STATE_DISCONNECTED;
     private String mDeviceAddress;
-    private Handler mHandler = new Handler(Looper.getMainLooper());
+    private final Handler mHandler = new Handler(Looper.getMainLooper());
 
-    // Reconnect
+    // Reconnect and Timeouts
     private static final int RECONNECT_DELAY_MS = 5000;
+    private static final int CONNECT_TIMEOUT_MS = 15000;
     private boolean mReconnectEnabled = true;
     private Runnable mReconnectRunnable;
+    private Runnable mConnectTimeoutRunnable;
 
     public class LocalBinder extends Binder {
         public BleService getService() { return BleService.this; }
@@ -53,26 +54,77 @@ public class BleService extends Service {
 
     public boolean connect(String address) {
         if (mBluetoothAdapter == null || address == null) return false;
+        
+        // If already connected to this address, just broadcast success
+        if (mConnectionState == BleConstants.STATE_CONNECTED && address.equals(mDeviceAddress)) {
+            broadcastUpdate(BleConstants.ACTION_GATT_CONNECTED);
+            return true;
+        }
+
         mDeviceAddress = address;
         mReconnectEnabled = true;
 
+        stopConnectTimeout();
+        
         if (mBluetoothGatt != null) {
+            Log.d(TAG, "Closing existing GATT connection before new attempt");
             mBluetoothGatt.close();
             mBluetoothGatt = null;
         }
 
-        BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
         mConnectionState = BleConstants.STATE_CONNECTING;
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            mBluetoothGatt = device.connectGatt(this, false, mGattCallback, BluetoothDevice.TRANSPORT_LE);
-        } else {
-            mBluetoothGatt = device.connectGatt(this, false, mGattCallback);
-        }
+        
+        // Motorola fix: add a small delay and use application context
+        mHandler.postDelayed(() -> {
+            try {
+                BluetoothDevice device = mBluetoothAdapter.getRemoteDevice(address);
+                Log.i(TAG, "Initiating GATT connection to " + address);
+                
+                // Moto G / Legacy fix: Use autoConnect=false and potentially different transport
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                    mBluetoothGatt = device.connectGatt(this, false, mGattCallback, BluetoothDevice.TRANSPORT_LE);
+                } else {
+                    //noinspection deprecation
+                    mBluetoothGatt = device.connectGatt(this, false, mGattCallback);
+                }
+                
+                if (mBluetoothGatt == null) {
+                    Log.e(TAG, "connectGatt returned null");
+                    handleDisconnect();
+                } else {
+                    startConnectTimeout();
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Error during connectGatt", e);
+                handleDisconnect();
+            }
+        }, 500); // Increased delay for Moto G stability
+        
         return true;
+    }
+
+    private void startConnectTimeout() {
+        stopConnectTimeout();
+        mConnectTimeoutRunnable = () -> {
+            if (mConnectionState == BleConstants.STATE_CONNECTING) {
+                Log.w(TAG, "Connection timeout reached for " + mDeviceAddress);
+                close();
+                handleDisconnect();
+            }
+        };
+        mHandler.postDelayed(mConnectTimeoutRunnable, CONNECT_TIMEOUT_MS);
+    }
+
+    private void stopConnectTimeout() {
+        if (mConnectTimeoutRunnable != null) {
+            mHandler.removeCallbacks(mConnectTimeoutRunnable);
+            mConnectTimeoutRunnable = null;
+        }
     }
 
     public void disconnect() {
         mReconnectEnabled = false;
+        stopConnectTimeout();
         if (mReconnectRunnable != null) {
             mHandler.removeCallbacks(mReconnectRunnable);
         }
@@ -87,6 +139,7 @@ public class BleService extends Service {
             mBluetoothGatt.close();
             mBluetoothGatt = null;
         }
+        mConnectionState = BleConstants.STATE_DISCONNECTED;
     }
 
     public int getConnectionState() { return mConnectionState; }
@@ -94,16 +147,27 @@ public class BleService extends Service {
     private final BluetoothGattCallback mGattCallback = new BluetoothGattCallback() {
         @Override
         public void onConnectionStateChange(BluetoothGatt gatt, int status, int newState) {
+            Log.d(TAG, "onConnectionStateChange status=" + status + " newState=" + newState);
+            
+            if (status != BluetoothGatt.GATT_SUCCESS) {
+                Log.w(TAG, "GATT error status: " + status + ". Closing GATT.");
+                gatt.close();
+                if (gatt == mBluetoothGatt) mBluetoothGatt = null;
+                handleDisconnect();
+                return;
+            }
+
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                stopConnectTimeout();
                 mConnectionState = BleConstants.STATE_CONNECTED;
                 Log.i(TAG, "Connected to GATT server, discovering services...");
-                gatt.discoverServices();
+                // Motorola/Samsung fix: discoverServices works better on UI thread with a delay
+                mHandler.postDelayed(gatt::discoverServices, 600);
                 broadcastUpdate(BleConstants.ACTION_GATT_CONNECTED);
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                mConnectionState = BleConstants.STATE_DISCONNECTED;
-                Log.i(TAG, "Disconnected from GATT server");
-                broadcastUpdate(BleConstants.ACTION_GATT_DISCONNECTED);
-                scheduleReconnect();
+                gatt.close();
+                if (gatt == mBluetoothGatt) mBluetoothGatt = null;
+                handleDisconnect();
             }
         }
 
@@ -131,15 +195,22 @@ public class BleService extends Service {
         }
     };
 
+    private void handleDisconnect() {
+        mConnectionState = BleConstants.STATE_DISCONNECTED;
+        Log.i(TAG, "Disconnected from GATT server");
+        broadcastUpdate(BleConstants.ACTION_GATT_DISCONNECTED);
+        if (mReconnectEnabled) {
+            scheduleReconnect();
+        }
+    }
+
     private void enableNotifications(BluetoothGatt gatt) {
-        // Try both service UUIDs
         BluetoothGattCharacteristic characteristic = findCharacteristic(gatt,
                 BleConstants.SERVICE_AE00, BleConstants.CHAR_AE02);
         if (characteristic == null) {
             characteristic = findCharacteristic(gatt,
                     BleConstants.SERVICE_AE30, BleConstants.CHAR_AE02);
         }
-        // Also try any service that contains ae02
         if (characteristic == null) {
             for (BluetoothGattService svc : gatt.getServices()) {
                 BluetoothGattCharacteristic c = svc.getCharacteristic(BleConstants.CHAR_AE02);

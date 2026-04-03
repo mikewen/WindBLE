@@ -3,12 +3,11 @@ package com.windble.app.gps;
 import android.Manifest;
 import android.content.Context;
 import android.content.pm.PackageManager;
-import android.location.GnssStatus;
 import android.location.Location;
 import android.location.LocationListener;
 import android.location.LocationManager;
-import android.os.Build;
 import android.os.Bundle;
+import android.os.Looper;
 import android.util.Log;
 
 import androidx.core.content.ContextCompat;
@@ -53,13 +52,17 @@ public class GpsManager {
             return;
         }
         try {
+            // Moto G Fix: Explicitly provide a Looper (MainLooper) for location updates
             mLocationManager.requestLocationUpdates(
                     LocationManager.GPS_PROVIDER,
-                    MIN_TIME_MS, MIN_DIST_M, mLocationListener);
+                    MIN_TIME_MS, MIN_DIST_M, mLocationListener, Looper.getMainLooper());
+            
             // Fallback to network
-            mLocationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    MIN_TIME_MS * 2, MIN_DIST_M, mLocationListener);
+            if (mLocationManager.getProvider(LocationManager.NETWORK_PROVIDER) != null) {
+                mLocationManager.requestLocationUpdates(
+                        LocationManager.NETWORK_PROVIDER,
+                        MIN_TIME_MS * 2, MIN_DIST_M, mLocationListener, Looper.getMainLooper());
+            }
             mEnabled = true;
             Log.i(TAG, "GPS started");
         } catch (Exception e) {

@@ -70,7 +70,7 @@ public class WindHttpServer {
 
     public void start() {
         if (mRunning) return;
-        mRunning = true;   // set synchronously so isRunning() is true immediately
+        mRunning = true;
         mPool = Executors.newCachedThreadPool();
         mPool.execute(() -> {
             try {
@@ -88,7 +88,7 @@ public class WindHttpServer {
                     }
                 }
             } catch (IOException e) {
-                mRunning = false;   // bind failed — revert
+                mRunning = false;
                 Log.e(TAG, "Server error", e);
                 if (mListener != null) mListener.onError(e.getMessage());
             }
@@ -135,13 +135,11 @@ public class WindHttpServer {
             String requestLine = reader.readLine();
             if (requestLine == null) { closeQuietly(socket); return; }
 
-            // Read all headers (discard)
             String line;
             while ((line = reader.readLine()) != null && !line.isEmpty()) { /* skip */ }
 
             String[] parts = requestLine.split(" ");
             String path = (parts.length >= 2) ? parts[1] : "/";
-            // Strip query string
             int q = path.indexOf('?');
             if (q >= 0) path = path.substring(0, q);
 
@@ -164,7 +162,6 @@ public class WindHttpServer {
         }
     }
 
-    /** Serve the HTML page from assets. */
     private void handleHtml(Socket socket) throws IOException {
         byte[] html = loadAsset("wind_display.html");
         OutputStream out = socket.getOutputStream();
@@ -180,7 +177,6 @@ public class WindHttpServer {
         closeQuietly(socket);
     }
 
-    /** Return latest JSON snapshot (polling fallback). */
     private void handleSnapshot(Socket socket) throws IOException {
         byte[] body = mLastJson.getBytes(StandardCharsets.UTF_8);
         OutputStream out = socket.getOutputStream();
@@ -197,10 +193,9 @@ public class WindHttpServer {
         closeQuietly(socket);
     }
 
-    /** Upgrade to SSE stream; keep socket open until client disconnects. */
     private void handleSse(Socket socket) {
         try {
-            socket.setSoTimeout(0); // no timeout for SSE
+            socket.setSoTimeout(0);
             OutputStream out = socket.getOutputStream();
             PrintWriter head = new PrintWriter(new OutputStreamWriter(out, StandardCharsets.UTF_8), false);
             head.printf("HTTP/1.1 200 OK\r\n");
@@ -215,10 +210,7 @@ public class WindHttpServer {
             mSseClients.add(client);
             if (mListener != null) mListener.onClientConnected(mSseClients.size());
 
-            // Send latest snapshot immediately
             client.send(mLastJson);
-
-            // Block until client disconnects (detected via write failure)
             client.waitForDisconnect();
 
         } catch (IOException e) {
@@ -229,8 +221,6 @@ public class WindHttpServer {
             if (mListener != null) mListener.onClientConnected(mSseClients.size());
         }
     }
-
-    // ---- SSE client wrapper ----
 
     private static class SseClient {
         final Socket socket;
@@ -255,7 +245,6 @@ public class WindHttpServer {
         }
 
         void waitForDisconnect() {
-            // Send a keepalive comment every 15 s; write failure = client gone
             while (!dead) {
                 try {
                     Thread.sleep(15_000);
@@ -273,15 +262,15 @@ public class WindHttpServer {
         }
     }
 
-    // ---- Helpers ----
-
     private String toJson(WindData wd, String unit) {
         return String.format(Locale.US,
-                "{\"aws\":%.2f,\"awa\":%.1f,\"tws\":%.2f,\"twa\":%.1f," +
-                        "\"twd\":%.1f,\"sog\":%.2f,\"cog\":%.1f,\"hdg\":%.1f," +
+                "{\"aws\":%.2f,\"awa\":%.1f,\"aws1m\":%.2f,\"awsMax1m\":%.2f,\"aws1h\":%.2f,\"awsMax1h\":%.2f," +
+                        "\"tws\":%.2f,\"twa\":%.1f,\"twd\":%.1f," +
+                        "\"sog\":%.2f,\"cog\":%.1f,\"hdg\":%.1f," +
                         "\"unit\":\"%s\",\"ts\":%d}",
-                wd.aws, wd.awa, wd.tws, wd.twa,
-                wd.twd, wd.sog, wd.cog, wd.heading,
+                wd.aws, wd.awa, wd.awsAvg1m, wd.awsMax1m, wd.awsAvg1h, wd.awsMax1h,
+                wd.tws, wd.twa, wd.twd,
+                wd.sog, wd.cog, wd.heading,
                 unit, System.currentTimeMillis());
     }
 
@@ -290,7 +279,6 @@ public class WindHttpServer {
             AssetManager am = mContext.getAssets();
             InputStream is = am.open(name);
             byte[] buf = new byte[is.available()];
-            //noinspection ResultOfMethodCallIgnored
             is.read(buf);
             is.close();
             return buf;

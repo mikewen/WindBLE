@@ -32,7 +32,7 @@ body.ink {
   --bg-card2: #e8e8e8;
   --border:   #888888;
   --text:     #000000;
-  --muted:    #555555;
+  --muted:     #555555;
   --apparent: #0066cc;
   --true:     #cc3300;
   --gps:      #006600;
@@ -103,7 +103,7 @@ body {
 /* ── Data grid ──────────────────────────────────────────────── */
 #grid {
   display: grid;
-  grid-template-columns: repeat(4, 1fr);
+  grid-template-columns: repeat(5, 1fr);
   gap: 4px;
   padding: 6px;
   flex-shrink: 0;
@@ -114,9 +114,12 @@ body {
   border-radius: 6px;
   padding: 5px 4px;
   text-align: center;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
 }
 .cell .lbl {
-  font-size: 9px;
+  font-size: 8px;
   color: var(--muted);
   text-transform: uppercase;
   letter-spacing: .08em;
@@ -124,14 +127,24 @@ body {
   margin-bottom: 2px;
 }
 .cell .val {
-  font-size: 15px;
+  font-size: 13px;
   font-weight: bold;
   display: block;
   white-space: nowrap;
 }
-.apparent .val { color: var(--apparent); }
-.true     .val { color: var(--true); }
-.gps      .val { color: var(--gps); }
+.cell .sub-lbl {
+  font-size: 7px;
+  color: var(--muted);
+  margin-top: 3px;
+  line-height: 1;
+}
+.cell .sub-val {
+  font-size: 10px;
+  font-weight: bold;
+}
+.apparent .val, .apparent .sub-val { color: var(--apparent); }
+.true     .val, .true .sub-val     { color: var(--true); }
+.gps      .val                     { color: var(--gps); }
 
 /* ── View toggle bar ─────────────────────────────────────────── */
 #toggleBar {
@@ -199,8 +212,8 @@ body {
 
 /* ── Responsive: small screens (Kindle 6" ≈ 600px wide) ─────── */
 @media (max-width: 480px) {
-  .cell .val { font-size: 13px; }
-  .cell .lbl { font-size: 8px; }
+  .cell .val { font-size: 11px; }
+  .cell .lbl { font-size: 7px; }
   #grid { gap: 3px; padding: 4px; }
 }
 /* Very tall narrow screens — make compass smaller to fit grid */
@@ -228,10 +241,19 @@ body {
 <div id="grid">
   <div class="cell apparent"><span class="lbl">AWS</span><span class="val" id="dAws">--</span></div>
   <div class="cell apparent"><span class="lbl">AWA</span><span class="val" id="dAwa">--</span></div>
+  <div class="cell apparent">
+    <span class="lbl">1m Avg</span><span class="val" id="dAws1m">--</span>
+    <span class="sub-lbl">MAX</span><span class="sub-val" id="dAwsMax1m">--</span>
+  </div>
+  <div class="cell apparent">
+    <span class="lbl">1h Avg</span><span class="val" id="dAws1h">--</span>
+    <span class="sub-lbl">MAX</span><span class="sub-val" id="dAwsMax1h">--</span>
+  </div>
+  <div class="cell gps">     <span class="lbl">SOG</span><span class="val" id="dSog">--</span></div>
+
   <div class="cell true">    <span class="lbl">TWS</span><span class="val" id="dTws">--</span></div>
   <div class="cell true">    <span class="lbl">TWA</span><span class="val" id="dTwa">--</span></div>
   <div class="cell true">    <span class="lbl">TWD</span><span class="val" id="dTwd">--</span></div>
-  <div class="cell gps">     <span class="lbl">SOG</span><span class="val" id="dSog">--</span></div>
   <div class="cell gps">     <span class="lbl">COG</span><span class="val" id="dCog">--</span></div>
   <div class="cell">         <span class="lbl">HDG</span><span class="val" id="dHdg">--</span></div>
 </div>
@@ -260,10 +282,10 @@ body {
 
 // ── State ────────────────────────────────────────────────────────
 var state = {
-  aws:0, awa:0, tws:0, twa:0, twd:0, sog:0, cog:0, hdg:0, unit:'kt'
+  aws:0, awa:0, aws1m:0, awsMax1m:0, aws1h:0, awsMax1h:0, tws:0, twa:0, twd:0, sog:0, cog:0, hdg:0, unit:'kt'
 };
-var viewMode    = 'compass';  // 'compass' | 'boat'
-var largeFields = ['TWA','TWS','TWD','AWA','AWS','SOG'];
+var viewMode    = 'compass';
+var largeFields = ['TWA','TWS','TWD','AWA','AWS','AWS1M','SOG'];
 var largeIdx    = 0;
 var inkMode     = window.location.search.indexOf('mode=ink') >= 0;
 var canvas, ctx, W, H, R, CX, CY;
@@ -271,7 +293,6 @@ var animFrame   = null;
 var connected   = false;
 var lastTs      = 0;
 
-// ── Init ─────────────────────────────────────────────────────────
 window.addEventListener('load', function () {
   canvas = document.getElementById('compass');
   ctx    = canvas.getContext('2d');
@@ -279,7 +300,6 @@ window.addEventListener('load', function () {
   resizeCanvas();
   window.addEventListener('resize', resizeCanvas);
 
-  // Long-press large overlay to close
   var pressTimer;
   document.getElementById('largeOverlay').addEventListener('mousedown',  startPress);
   document.getElementById('largeOverlay').addEventListener('touchstart', startPress, {passive:true});
@@ -289,7 +309,7 @@ window.addEventListener('load', function () {
   function cancelPress() { clearTimeout(pressTimer); }
 
   startConnection();
-  drawCompass(); // draw empty compass immediately
+  drawCompass();
 });
 
 function resizeCanvas() {
@@ -303,7 +323,6 @@ function resizeCanvas() {
   drawCompass();
 }
 
-// ── Connection (SSE with polling fallback) ───────────────────────
 var es, pollTimer;
 
 function startConnection() {
@@ -320,7 +339,7 @@ function startConnection() {
     es.onerror = function() {
       setStatus('disconnected');
       es.close();
-      startPolling(); // fall back to polling
+      startPolling();
     };
   } else {
     startPolling();
@@ -367,7 +386,6 @@ function onShift(d) {
   clearTimeout(banner._t);
   banner._t = setTimeout(function() { banner.style.display = 'none'; }, 8000);
 
-  // Also show in large overlay
   var ls = document.getElementById('largeShift');
   ls.textContent = msg;
   ls.style.color = isLift ? 'var(--gps)' : 'var(--danger)';
@@ -376,7 +394,6 @@ function onShift(d) {
   ls._t = setTimeout(function() { ls.style.display = 'none'; }, 5000);
 }
 
-// ── Status ───────────────────────────────────────────────────────
 function setStatus(s) {
   connected = s === 'connected';
   var dot  = document.getElementById('statusDot');
@@ -395,25 +412,28 @@ function updateLastUpdateTime() {
   document.getElementById('lastUpdate').textContent = hh+':'+mm+':'+ss;
 }
 
-// ── Data grid ────────────────────────────────────────────────────
 function fmtSpeed(ms) {
   var u = state.unit || 'kt';
-  if (u === 'm/s') return ms.toFixed(1) + ' m/s';
-  if (u === 'km/h') return (ms * 3.6).toFixed(1) + ' kh';
-  return (ms * 1.944).toFixed(1) + ' kt';
+  if (u === 'm/s') return ms.toFixed(1);
+  if (u === 'km/h') return (ms * 3.6).toFixed(1);
+  return (ms * 1.944).toFixed(1);
 }
 function updateGrid() {
-  document.getElementById('dAws').textContent = fmtSpeed(state.aws);
-  document.getElementById('dAwa').textContent = state.awa.toFixed(1) + '°';
-  document.getElementById('dTws').textContent = fmtSpeed(state.tws);
-  document.getElementById('dTwa').textContent = state.twa.toFixed(1) + '°';
-  document.getElementById('dTwd').textContent = state.twd.toFixed(0) + '°T';
-  document.getElementById('dSog').textContent = fmtSpeed(state.sog);
-  document.getElementById('dCog').textContent = state.cog.toFixed(0) + '°T';
-  document.getElementById('dHdg').textContent = state.hdg.toFixed(0) + '°T';
+  var uSuffix = " " + (state.unit || 'kt');
+  document.getElementById('dAws').textContent   = fmtSpeed(state.aws) + uSuffix;
+  document.getElementById('dAwa').textContent   = state.awa.toFixed(1) + '°';
+  document.getElementById('dAws1m').textContent = fmtSpeed(state.aws1m || 0) + uSuffix;
+  document.getElementById('dAwsMax1m').textContent = fmtSpeed(state.awsMax1m || 0) + uSuffix;
+  document.getElementById('dAws1h').textContent = fmtSpeed(state.aws1h || 0) + uSuffix;
+  document.getElementById('dAwsMax1h').textContent = fmtSpeed(state.awsMax1h || 0) + uSuffix;
+  document.getElementById('dTws').textContent   = fmtSpeed(state.tws) + uSuffix;
+  document.getElementById('dTwa').textContent   = state.twa.toFixed(1) + '°';
+  document.getElementById('dTwd').textContent   = state.twd.toFixed(0) + '°T';
+  document.getElementById('dSog').textContent   = fmtSpeed(state.sog) + uSuffix;
+  document.getElementById('dCog').textContent   = state.cog.toFixed(0) + '°T';
+  document.getElementById('dHdg').textContent   = state.hdg.toFixed(0) + '°T';
 }
 
-// ── View mode ────────────────────────────────────────────────────
 function setViewMode(m) {
   viewMode = m;
   document.getElementById('btnCompass').classList.toggle('active', m === 'compass');
@@ -421,7 +441,6 @@ function setViewMode(m) {
   if (animFrame === null) animFrame = requestAnimationFrame(drawCompass);
 }
 
-// ── Large number overlay ─────────────────────────────────────────
 function openLarge() {
   document.getElementById('largeOverlay').classList.add('show');
   updateLargeOverlay();
@@ -435,18 +454,23 @@ function cycleLargeField() {
 }
 var LARGE_COLORS = {
   TWA:'var(--true)', TWS:'var(--true)', TWD:'var(--true)',
-  AWA:'var(--apparent)', AWS:'var(--apparent)', SOG:'var(--gps)'
+  AWA:'var(--apparent)', AWS:'var(--apparent)', AWS1M:'var(--apparent)', SOG:'var(--gps)'
 };
 function updateLargeOverlay() {
   var field = largeFields[largeIdx];
   var val, unit;
+  var mult = 1.944;
+  if (state.unit === 'm/s') mult = 1;
+  else if (state.unit === 'km/h') mult = 3.6;
+
   switch(field) {
     case 'TWA': val = state.twa.toFixed(0); unit = '°'; break;
-    case 'TWS': val = (state.tws*1.944).toFixed(1); unit = state.unit||'kt'; break;
+    case 'TWS': val = (state.tws*mult).toFixed(1); unit = state.unit||'kt'; break;
     case 'TWD': val = state.twd.toFixed(0); unit = '°T'; break;
     case 'AWA': val = state.awa.toFixed(0); unit = '°'; break;
-    case 'AWS': val = (state.aws*1.944).toFixed(1); unit = state.unit||'kt'; break;
-    case 'SOG': val = (state.sog*1.944).toFixed(1); unit = state.unit||'kt'; break;
+    case 'AWS': val = (state.aws*mult).toFixed(1); unit = state.unit||'kt'; break;
+    case 'AWS1M': val = ((state.aws1m||0)*mult).toFixed(1); unit = (state.unit||'kt') + ' 1m'; break;
+    case 'SOG': val = (state.sog*mult).toFixed(1); unit = state.unit||'kt'; break;
     default: val = '--'; unit = '';
   }
   document.getElementById('largeLbl').textContent = field;
@@ -455,26 +479,17 @@ function updateLargeOverlay() {
   document.getElementById('largeUnit').textContent = unit;
 }
 
-// ── Ink mode toggle ──────────────────────────────────────────────
 function toggleInk() {
   inkMode = !inkMode;
   document.body.classList.toggle('ink', inkMode);
   if (animFrame === null) animFrame = requestAnimationFrame(drawCompass);
 }
 
-// ── Compass drawing ───────────────────────────────────────────────
-function getVar(name) {
-  return getComputedStyle(document.body).getPropertyValue(name).trim();
-}
-
 function drawCompass() {
   animFrame = null;
   if (!ctx) return;
   ctx.clearRect(0, 0, W, H);
-
   var ink = document.body.classList.contains('ink');
-
-  // Colors from CSS variables
   var cBg      = ink ? '#ffffff' : '#0a0e1a';
   var cRing    = ink ? '#e8e8e8' : '#1a2540';
   var cBorder  = ink ? '#888888' : '#2a3a60';
@@ -485,20 +500,14 @@ function drawCompass() {
   var cTrue    = ink ? '#cc3300' : '#ff6b35';
   var cBoat    = ink ? '#333333' : '#a0c0ff';
   var cText    = ink ? '#000000' : '#e8f0ff';
-
-  // Background
   ctx.fillStyle = cBg;
   ctx.fillRect(0, 0, W, H);
-
   var compassRotation = (viewMode === 'compass') ? -degToRad(state.hdg) : 0;
-
   ctx.save();
   ctx.translate(CX, CY);
   ctx.rotate(compassRotation);
   drawRing(cRing, cBorder, cTick, cCard, cNorth, ink);
   ctx.restore();
-
-  // Wind arrows (in boat frame always; compass mode rotates the ring not the arrows)
   ctx.save();
   ctx.translate(CX, CY);
   var apparentAngle = (viewMode === 'boat') ? state.awa : state.hdg + state.awa;
@@ -506,39 +515,27 @@ function drawCompass() {
   drawArrow(trueAngle,     R * 0.55, R * 0.12, cTrue,     true);
   drawArrow(apparentAngle, R * 0.50, R * 0.12, cApparent, false);
   ctx.restore();
-
-  // Boat icon
   ctx.save();
   ctx.translate(CX, CY);
   drawBoat(cBoat, ink);
   ctx.restore();
-
-  // Speed labels below compass
-  drawSpeedBoxes(cApparent, cTrue, cText, ink);
 }
 
 function drawRing(cRing, cBorder, cTick, cCard, cNorth, ink) {
-  // Fill
   ctx.beginPath();
   ctx.arc(0, 0, R, 0, Math.PI*2);
   ctx.fillStyle = cRing;
   ctx.fill();
-
-  // Outer border
   ctx.beginPath();
   ctx.arc(0, 0, R, 0, Math.PI*2);
   ctx.strokeStyle = cBorder;
   ctx.lineWidth = ink ? 2 : 2.5;
   ctx.stroke();
-
-  // Inner ring
   ctx.beginPath();
   ctx.arc(0, 0, R * 0.75, 0, Math.PI*2);
   ctx.strokeStyle = cBorder;
   ctx.lineWidth = 1;
   ctx.stroke();
-
-  // Degree ticks
   for (var deg = 0; deg < 360; deg += 5) {
     var rad  = degToRad(deg);
     var sin  = Math.sin(rad), cos = Math.cos(rad);
@@ -555,8 +552,6 @@ function drawRing(cRing, cBorder, cTick, cCard, cNorth, ink) {
     ctx.lineWidth = lw;
     ctx.stroke();
   }
-
-  // Cardinal labels
   var cardinals = ['N','E','S','W'];
   var cardDegs  = [0, 90, 180, 270];
   var labelR    = R * 0.635;
@@ -577,8 +572,6 @@ function drawArrow(angleDeg, len, headLen, color, filled) {
   var rad  = degToRad(angleDeg);
   var sin  = Math.sin(rad), cos = Math.cos(rad);
   var tipX = sin * len, tipY = -cos * len;
-
-  // Shaft
   ctx.beginPath();
   ctx.moveTo(0, 0);
   ctx.lineTo(tipX, tipY);
@@ -586,8 +579,6 @@ function drawArrow(angleDeg, len, headLen, color, filled) {
   ctx.lineWidth = 2.5;
   ctx.lineCap = 'round';
   ctx.stroke();
-
-  // Arrowhead
   var ha = degToRad(30);
   var hx1 = tipX - headLen * Math.sin(rad - ha);
   var hy1 = tipY + headLen * Math.cos(rad - ha);
@@ -620,76 +611,12 @@ function drawBoat(color, ink) {
   ctx.strokeStyle = color;
   ctx.lineWidth = ink ? 2 : 2.5;
   ctx.stroke();
-  // Mast
   ctx.beginPath();
   ctx.moveTo(0, -s*0.6);
   ctx.lineTo(0, s*0.3);
   ctx.strokeStyle = color;
   ctx.lineWidth = 1.5;
   ctx.stroke();
-}
-
-function drawSpeedBoxes(cApparent, cTrue, cText, ink) {
-  var boxW  = R * 0.6;
-  var boxH  = R * 0.45;
-  var boxY  = CY + R * 1.0;
-  var gap   = R * 0.65;
-  if (boxY + boxH > H - 4) return; // no room
-
-  drawDataBox(CX - gap*0.5, boxY, boxW, boxH,
-              cApparent, 'AWS', fmtSpeed(state.aws), state.awa.toFixed(0)+'°', ink);
-  drawDataBox(CX + gap*0.5, boxY, boxW, boxH,
-              cTrue, 'TWS', fmtSpeed(state.tws),
-              (viewMode==='compass' ? state.twd : state.twa).toFixed(0)+'°', ink);
-}
-
-function drawDataBox(cx, cy, w, h, color, label, speed, angle, ink) {
-  var l = cx - w/2, t = cy - h/2;
-
-  // Background
-  ctx.fillStyle = ink ? 'rgba(240,240,240,0.9)' : 'rgba(10,18,40,0.85)';
-  roundRect(l, t, w, h, 8);
-  ctx.fill();
-
-  // Border
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 1.5;
-  roundRect(l, t, w, h, 8);
-  ctx.stroke();
-
-  ctx.textAlign = 'center';
-
-  // Label
-  ctx.fillStyle = color;
-  ctx.font = 'bold ' + Math.max(9, R*0.075) + 'px sans-serif';
-  ctx.fillText(label, cx, t + h*0.24);
-
-  // Speed value
-  ctx.fillStyle = ink ? '#000' : '#fff';
-  ctx.font = 'bold ' + Math.max(12, R*0.16) + 'px monospace';
-  ctx.fillText(speed, cx, t + h*0.57);
-
-  // Angle
-  ctx.fillStyle = ink ? '#444' : '#a0c0e0';
-  ctx.font = Math.max(9, R*0.10) + 'px monospace';
-  ctx.fillText(angle, cx, t + h*0.85);
-}
-
-function roundRect(x, y, w, h, r) {
-  ctx.beginPath();
-  ctx.moveTo(x+r, y);
-  ctx.lineTo(x+w-r, y);   ctx.arcTo(x+w, y,   x+w, y+r,   r);
-  ctx.lineTo(x+w, y+h-r); ctx.arcTo(x+w, y+h, x+w-r, y+h, r);
-  ctx.lineTo(x+r, y+h);   ctx.arcTo(x,   y+h, x, y+h-r,   r);
-  ctx.lineTo(x, y+r);     ctx.arcTo(x,   y,   x+r, y,      r);
-  ctx.closePath();
-}
-
-function fmtSpeed(ms) {
-  var u = state.unit || 'kt';
-  if (u === 'm/s')  return ms.toFixed(1) + ' m/s';
-  if (u === 'km/h') return (ms * 3.6).toFixed(1) + ' kh';
-  return (ms * 1.944).toFixed(1) + ' kt';
 }
 
 function degToRad(d) { return d * Math.PI / 180; }

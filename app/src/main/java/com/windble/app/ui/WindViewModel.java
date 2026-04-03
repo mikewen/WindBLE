@@ -23,20 +23,19 @@ import androidx.lifecycle.LiveData;
 import androidx.lifecycle.MutableLiveData;
 import androidx.preference.PreferenceManager;
 
-import com.windble.app.alert.WindShiftAlert;
-import com.windble.app.server.WindHttpServer;
 import com.windble.app.ble.BleConstants;
 import com.windble.app.ble.BleService;
 import com.windble.app.gps.BleGpsManager;
 import com.windble.app.gps.GpsManager;
 import com.windble.app.gps.NmeaParser;
-import com.windble.app.logger.TripLogger;
 import com.windble.app.model.WindData;
+import com.windble.app.server.WindHttpServer;
+import com.windble.app.logger.TripLogger;
+import com.windble.app.alert.WindShiftAlert;
 
-/**
- * Main ViewModel for wind data processing and UI state.
- * Handles BLE connectivity, GPS data merging, compass sensor, and preferences.
- */
+import java.util.ArrayDeque;
+import java.util.Deque;
+
 public class WindViewModel extends AndroidViewModel {
     private static final String TAG = "WindViewModel";
 
@@ -47,63 +46,50 @@ public class WindViewModel extends AndroidViewModel {
     public static final int GPS_SOURCE_PHONE = 0;
     public static final int GPS_SOURCE_BLE   = 1;
 
-    /** Carries a single wind-shift event to observers (one-shot via SingleLiveEvent). */
-    public static class ShiftEvent {
-        public final float shiftDeg;
-        public final WindShiftAlert.ShiftType type;
-        public final float newTwd;
-        public ShiftEvent(float s, WindShiftAlert.ShiftType t, float twd) {
-            shiftDeg = s; type = t; newTwd = twd;
-        }
-    }
+    private final MutableLiveData<WindData> mWindData = new MutableLiveData<>();
+    private final MutableLiveData<Integer> mConnectionState = new MutableLiveData<>(BleConstants.STATE_DISCONNECTED);
+    private final MutableLiveData<String> mConnectedDevice = new MutableLiveData<>("");
+    private final MutableLiveData<Float> mCompassHeading = new MutableLiveData<>(0f);
+    private final MutableLiveData<Boolean> mGpsAvailable = new MutableLiveData<>(false);
+    private final MutableLiveData<Integer> mBleGpsState = new MutableLiveData<>(BluetoothProfile.STATE_DISCONNECTED);
+    private final MutableLiveData<String> mBleGpsDevice = new MutableLiveData<>("");
+    private final MutableLiveData<String> mLastNmea = new MutableLiveData<>("");
+    private final MutableLiveData<Integer> mGpsSource = new MutableLiveData<>(GPS_SOURCE_PHONE);
+    private final MutableLiveData<Boolean> mLogging = new MutableLiveData<>(false);
+    private final MutableLiveData<Integer> mLogRowCount = new MutableLiveData<>(0);
+    private final MutableLiveData<Boolean> mNightMode = new MutableLiveData<>(false);
+    private final MutableLiveData<Boolean> mShiftAlertOn = new MutableLiveData<>(false);
+    private final MutableLiveData<ShiftEvent> mShiftEvent = new MutableLiveData<>();
+    private final MutableLiveData<Boolean> mKeepScreenOn = new MutableLiveData<>(true);
 
-    // --- LiveData ---
-    private final MutableLiveData<WindData>    mWindData        = new MutableLiveData<>();
-    private final MutableLiveData<Integer>     mConnectionState = new MutableLiveData<>(BleConstants.STATE_DISCONNECTED);
-    private final MutableLiveData<String>      mConnectedDevice = new MutableLiveData<>("");
-    private final MutableLiveData<Float>       mCompassHeading  = new MutableLiveData<>(0f);
-    private final MutableLiveData<Boolean>     mGpsAvailable    = new MutableLiveData<>(false);
-    private final MutableLiveData<Integer>     mBleGpsState     = new MutableLiveData<>(BluetoothProfile.STATE_DISCONNECTED);
-    private final MutableLiveData<String>      mBleGpsDevice    = new MutableLiveData<>("");
-    private final MutableLiveData<String>      mLastNmea        = new MutableLiveData<>("");
-    private final MutableLiveData<Integer>     mGpsSource       = new MutableLiveData<>(GPS_SOURCE_PHONE);
-    private final MutableLiveData<Boolean>     mLogging         = new MutableLiveData<>(false);
-    private final MutableLiveData<Integer>     mLogRowCount     = new MutableLiveData<>(0);
-    private final MutableLiveData<Boolean>     mShiftAlertOn    = new MutableLiveData<>(false);
-    private final MutableLiveData<ShiftEvent>  mShiftEvent      = new MutableLiveData<>();
-    private final MutableLiveData<Boolean>     mNightMode       = new MutableLiveData<>(false);
-
-    private int mSpeedUnit = UNIT_KNOTS;
-    private final SharedPreferences mPrefs;
-
-    // --- Calibration ---
-    private float mAwaOffset = 0f;
-    private float mAwsMultiplier = 1.0f;
-
-    // --- Wind sensor BLE ---
     private BleService mBleService;
     private boolean mBound = false;
 
-    // --- GPS ---
-    private GpsManager    mGpsManager;
-    private BleGpsManager mBleGpsManager;
-    private float mSog = 0f;
-    private float mCog = 0f;
-
-    // --- Compass ---
-    private SensorManager mSensorManager;
-    private Sensor mAccelerometer, mMagnetometer;
-    private float[] mGravity, mGeomagnetic;
-    private float mHeading = 0f;
-
-    // --- Trip logger ---
-    private final TripLogger mTripLogger;
-
-    // --- HTTP server ---
+    private final GpsManager mGpsManager;
+    private final BleGpsManager mBleGpsManager;
     private final WindHttpServer mHttpServer;
-
-    // --- Wind shift alert ---
+    private final TripLogger mTripLogger;
     private final WindShiftAlert mShiftAlert;
+    private final SensorManager mSensorManager;
+    private final Sensor mAccelerometer, mMagnetometer;
+    private float[] mGravity, mGeomagnetic;
+    private float mHeading = 0;
+    private float mSog = 0, mCog = 0;
+
+    private final SharedPreferences mPrefs;
+    private int mSpeedUnit = UNIT_KNOTS;
+    private float mAwaOffset = 0, mAwsMultiplier = 1.0f;
+
+    // Rolling averages
+    private final Deque<AwsSample> mHistory1m = new ArrayDeque<>();
+    private final Deque<AwsSample> mHistory1h = new ArrayDeque<>();
+    private double mSum1m = 0, mSum1h = 0;
+
+    public static class AwsSample { long ts; float val; AwsSample(long t, float v){ts=t; val=v;} }
+    public static class ShiftEvent {
+        public float shiftDeg, newTwd; public WindShiftAlert.ShiftType type;
+        ShiftEvent(float d, WindShiftAlert.ShiftType t, float n) { shiftDeg=d; type=t; newTwd=n; }
+    }
 
     public WindViewModel(@NonNull Application app) {
         super(app);
@@ -181,6 +167,9 @@ public class WindViewModel extends AndroidViewModel {
                 mSensorManager.registerListener(mSensorListener, mAccelerometer, SensorManager.SENSOR_DELAY_UI);
             if (mMagnetometer != null)
                 mSensorManager.registerListener(mSensorListener, mMagnetometer, SensorManager.SENSOR_DELAY_UI);
+        } else {
+            mAccelerometer = null;
+            mMagnetometer  = null;
         }
 
         // Load persisted preferences
@@ -200,6 +189,8 @@ public class WindViewModel extends AndroidViewModel {
         float threshold = mPrefs.getFloat("shift_threshold", 10f);
         mShiftAlert.setThreshold(threshold);
 
+        mKeepScreenOn.setValue(mPrefs.getBoolean("screen_on", true));
+
         try {
             mAwaOffset = Float.parseFloat(mPrefs.getString("awa_offset", "0.0"));
             mAwsMultiplier = Float.parseFloat(mPrefs.getString("aws_multiplier", "1.0"));
@@ -210,7 +201,7 @@ public class WindViewModel extends AndroidViewModel {
     }
 
     private final SharedPreferences.OnSharedPreferenceChangeListener mPrefListener = (prefs, key) -> {
-        if ("speed_unit".equals(key) || "awa_offset".equals(key) || "aws_multiplier".equals(key) || "shift_threshold".equals(key)) {
+        if ("speed_unit".equals(key) || "awa_offset".equals(key) || "aws_multiplier".equals(key) || "shift_threshold".equals(key) || "screen_on".equals(key)) {
             loadPreferences();
         }
     };
@@ -273,6 +264,9 @@ public class WindViewModel extends AndroidViewModel {
         wd.sog = mSog; wd.cog = mCog; wd.heading = mHeading;
         wd.hasGps = Boolean.TRUE.equals(mGpsAvailable.getValue());
         
+        // Update rolling averages
+        updateAverages(wd);
+
         // Main calculation: combine apparent wind with boat speed to get true wind
         wd.calculateTrueWind(wd.awa, wd.aws, mSog, mHeading);
         wd.valid = true;
@@ -287,10 +281,41 @@ public class WindViewModel extends AndroidViewModel {
         mWindData.postValue(wd);
     }
 
+    private synchronized void updateAverages(WindData wd) {
+        long now = System.currentTimeMillis();
+        
+        // 1-minute rolling average and max
+        mHistory1m.addLast(new AwsSample(now, wd.aws));
+        mSum1m += wd.aws;
+        while (!mHistory1m.isEmpty() && now - mHistory1m.peekFirst().ts > 60_000) {
+            mSum1m -= mHistory1m.removeFirst().val;
+        }
+        wd.awsAvg1m = (float) (mSum1m / mHistory1m.size());
+        
+        float max1m = 0;
+        for (AwsSample s : mHistory1m) if (s.val > max1m) max1m = s.val;
+        wd.awsMax1m = max1m;
+
+        // 1-hour rolling average and max
+        mHistory1h.addLast(new AwsSample(now, wd.aws));
+        mSum1h += wd.aws;
+        while (!mHistory1h.isEmpty() && now - mHistory1h.peekFirst().ts > 3600_000) {
+            mSum1h -= mHistory1h.removeFirst().val;
+        }
+        wd.awsAvg1h = (float) (mSum1h / mHistory1h.size());
+        
+        float max1h = 0;
+        for (AwsSample s : mHistory1h) if (s.val > max1h) max1h = s.val;
+        wd.awsMax1h = max1h;
+    }
+
     public void connectDevice(String address) {
         if (mBleService != null) {
-            mBleService.connect(address);
-            mConnectionState.postValue(BleConstants.STATE_CONNECTING);
+            if (mBleService.connect(address)) {
+                mConnectionState.postValue(BleConstants.STATE_CONNECTING);
+            } else {
+                mConnectionState.postValue(BleConstants.STATE_DISCONNECTED);
+            }
         }
     }
     public void disconnectDevice() { if (mBleService != null) mBleService.disconnect(); }
@@ -300,117 +325,76 @@ public class WindViewModel extends AndroidViewModel {
     public void connectBleGps(String address, String name) {
         mBleGpsManager.connect(address);
         mBleGpsDevice.postValue(name != null ? name : address);
-        mGpsSource.postValue(GPS_SOURCE_BLE);
     }
-    public void disconnectBleGps() {
-        mBleGpsManager.disconnect();
-        mBleGpsDevice.postValue("");
-        mGpsSource.postValue(GPS_SOURCE_PHONE);
-    }
-    public boolean isBleGpsConnected() {
-        return mBleGpsState.getValue() != null
-                && mBleGpsState.getValue() == BluetoothProfile.STATE_CONNECTED;
-    }
+    public void disconnectBleGps() { mBleGpsManager.disconnect(); }
 
-    // ---- Trip logging ----
+    // ---- Getters ----
 
-    public void startLogging()  { mTripLogger.start(); }
-    public void stopLogging()   { mTripLogger.stop(); }
-    public boolean isLogging()  { return mTripLogger.isLogging(); }
-    public TripLogger getTripLogger() { return mTripLogger; }
+    public LiveData<WindData> getWindData() { return mWindData; }
+    public LiveData<Integer> getConnectionState() { return mConnectionState; }
+    public LiveData<Float> getCompassHeading() { return mCompassHeading; }
+    public LiveData<Boolean> getGpsAvailable() { return mGpsAvailable; }
+    public LiveData<Integer> getBleGpsState() { return mBleGpsState; }
+    public LiveData<String> getLastNmea() { return mLastNmea; }
+    public LiveData<Boolean> getLogging() { return mLogging; }
+    public LiveData<Integer> getLogRowCount() { return mLogRowCount; }
+    public LiveData<Boolean> getNightMode() { return mNightMode; }
+    public LiveData<Boolean> getShiftAlertOn() { return mShiftAlertOn; }
+    public LiveData<ShiftEvent> getShiftEvent() { return mShiftEvent; }
+    public LiveData<Boolean> getKeepScreenOn() { return mKeepScreenOn; }
 
-    // ---- Wind shift alert ----
-
-    public void setShiftAlertEnabled(boolean on) {
-        mShiftAlert.setEnabled(on);
-        mShiftAlertOn.postValue(on);
-    }
+    public void setNightMode(boolean night) { mNightMode.setValue(night); }
+    public void setShiftAlertEnabled(boolean on) { mShiftAlertOn.setValue(on); }
     public void setShiftThreshold(float deg) {
         mShiftAlert.setThreshold(deg);
         mPrefs.edit().putFloat("shift_threshold", deg).apply();
     }
     public void resetShiftBaseline() { mShiftAlert.resetBaseline(); }
+
+    public void setKeepScreenOn(boolean on) {
+        mKeepScreenOn.setValue(on);
+        mPrefs.edit().putBoolean("screen_on", on).apply();
+    }
+
+    public void startLogging() { mTripLogger.start(); }
+    public void stopLogging() { mTripLogger.stop(); }
+    public boolean isLogging() { return Boolean.TRUE.equals(mLogging.getValue()); }
+
+    public void startWebServer() { mHttpServer.start(); }
+    public void stopWebServer() { mHttpServer.stop(); }
+    public boolean isWebServerRunning() { return mHttpServer.isRunning(); }
+    public WindHttpServer getHttpServer() { return mHttpServer; }
+
     public WindShiftAlert getShiftAlert() { return mShiftAlert; }
 
-    // ---- Night mode ----
-
-    public void setNightMode(boolean on) { mNightMode.postValue(on); }
-
-    // ---- Compass ----
+    public void setSpeedUnit(int unit) { mSpeedUnit = unit; }
+    public String formatSpeed(float ms) {
+        if (mSpeedUnit == UNIT_MS) return String.format("%.1f m/s", ms);
+        if (mSpeedUnit == UNIT_KMH) return String.format("%.1f km/h", ms * 3.6f);
+        return String.format("%.1f kt", ms * 1.94384f);
+    }
+    private String formatSpeedUnit() {
+        if (mSpeedUnit == UNIT_MS) return "m/s";
+        if (mSpeedUnit == UNIT_KMH) return "km/h";
+        return "kt";
+    }
 
     private final SensorEventListener mSensorListener = new SensorEventListener() {
         @Override
         public void onSensorChanged(SensorEvent event) {
-            if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER)
-                mGravity = event.values.clone();
-            else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD)
-                mGeomagnetic = event.values.clone();
-            
+            if (event.sensor.getType() == Sensor.TYPE_ACCELEROMETER) mGravity = event.values;
+            if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD) mGeomagnetic = event.values;
             if (mGravity != null && mGeomagnetic != null) {
                 float[] R = new float[9], I = new float[9];
                 if (SensorManager.getRotationMatrix(R, I, mGravity, mGeomagnetic)) {
-                    float[] o = new float[3];
-                    SensorManager.getOrientation(R, o);
-                    // o[0] is azimuth (heading) in radians
-                    mHeading = ((float) Math.toDegrees(o[0]) + 360) % 360;
+                    float[] orientation = new float[3];
+                    SensorManager.getOrientation(R, orientation);
+                    mHeading = (float) Math.toDegrees(orientation[0]);
+                    if (mHeading < 0) mHeading += 360;
                     mCompassHeading.postValue(mHeading);
                 }
             }
         }
         @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
     };
-
-    // ---- Unit formatting ----
-
-    public int  getSpeedUnit() { return mSpeedUnit; }
-    public void setSpeedUnit(int unit) { mSpeedUnit = unit; }
-
-    public String formatSpeedUnit() {
-        switch (mSpeedUnit) {
-            case UNIT_MS:  return "m/s";
-            case UNIT_KMH: return "km/h";
-            default:       return "kt";
-        }
-    }
-
-    public String formatSpeed(float ms) {
-        switch (mSpeedUnit) {
-            case UNIT_MS:  return String.format("%.1f m/s", ms);
-            case UNIT_KMH: return String.format("%.1f km/h", WindData.msToKmh(ms));
-            default:       return String.format("%.1f kt", WindData.msToKnots(ms));
-        }
-    }
-
-    // ---- LiveData getters ----
-
-    public WindHttpServer getHttpServer() { return mHttpServer; }
-    public void startWebServer()  { mHttpServer.start(); }
-    public void stopWebServer()   { mHttpServer.stop(); }
-    public boolean isWebServerRunning() { return mHttpServer.isRunning(); }
-
-    public LiveData<WindData>   getWindData()        { return mWindData; }
-    public LiveData<Integer>    getConnectionState() { return mConnectionState; }
-    public LiveData<String>     getConnectedDevice() { return mConnectedDevice; }
-    public LiveData<Float>      getCompassHeading()  { return mCompassHeading; }
-    public LiveData<Boolean>    getGpsAvailable()    { return mGpsAvailable; }
-    public LiveData<Integer>    getBleGpsState()     { return mBleGpsState; }
-    public LiveData<String>     getBleGpsDevice()    { return mBleGpsDevice; }
-    public LiveData<String>     getLastNmea()        { return mLastNmea; }
-    public LiveData<Integer>    getGpsSource()       { return mGpsSource; }
-    public LiveData<Boolean>    getLogging()         { return mLogging; }
-    public LiveData<Integer>    getLogRowCount()     { return mLogRowCount; }
-    public LiveData<Boolean>    getShiftAlertOn()    { return mShiftAlertOn; }
-    public LiveData<ShiftEvent> getShiftEvent()      { return mShiftEvent; }
-    public LiveData<Boolean>    getNightMode()       { return mNightMode; }
-
-    @Override
-    protected void onCleared() {
-        mPrefs.unregisterOnSharedPreferenceChangeListener(mPrefListener);
-        unbindBleService();
-        mGpsManager.stop();
-        mBleGpsManager.disconnect();
-        mTripLogger.stop();
-        if (mSensorManager != null) mSensorManager.unregisterListener(mSensorListener);
-        super.onCleared();
-    }
 }

@@ -44,7 +44,8 @@ public class MainActivity extends AppCompatActivity {
     private WindViewModel mViewModel;
     private WindCompassView mCompassView;
     private TextView mTvAws, mTvAwa, mTvTws, mTvTwa, mTvTwd, mTvSog, mTvCog, mTvHeading;
-    private TextView mTvStatus, mBtnConnect, mBtnToggleView;
+    private TextView mTvAws1m, mTvAwsMax1m, mTvAws1h, mTvAwsMax1h;
+    private TextView mTvStatus, mBtnConnect, mBtnToggleView, mBtnKeepScreen;
     private TextView mTvNmea, mTvShiftBanner, mTvLogStatus;
     private ImageView mIvGpsStatus, mIvBleStatus, mIvBleGpsStatus;
     private View mRootView;
@@ -83,16 +84,22 @@ public class MainActivity extends AppCompatActivity {
         mViewModel = new ViewModelProvider(this).get(WindViewModel.class);
         mViewModel.bindBleService();
 
+        bindViews();
+
         SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
-        if (prefs.getBoolean("screen_on", true))
+        boolean screenOn = prefs.getBoolean("screen_on", true);
+        if (screenOn) {
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        } else {
+            getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        }
+        updateKeepScreenButton(screenOn);
 
         String unitPref = prefs.getString("speed_unit", "knots");
         if ("ms".equals(unitPref))       mViewModel.setSpeedUnit(WindViewModel.UNIT_MS);
         else if ("kmh".equals(unitPref)) mViewModel.setSpeedUnit(WindViewModel.UNIT_KMH);
         else                             mViewModel.setSpeedUnit(WindViewModel.UNIT_KNOTS);
 
-        bindViews();
         setupListeners();
         observeViewModel();
         checkAndRequestPermissions();
@@ -116,11 +123,16 @@ public class MainActivity extends AppCompatActivity {
         mTvSog            = findViewById(R.id.tvSog);
         mTvCog            = findViewById(R.id.tvCog);
         mTvHeading        = findViewById(R.id.tvHeading);
+        mTvAws1m          = findViewById(R.id.tvAws1m);
+        mTvAwsMax1m       = findViewById(R.id.tvAwsMax1m);
+        mTvAws1h          = findViewById(R.id.tvAws1h);
+        mTvAwsMax1h       = findViewById(R.id.tvAwsMax1h);
         mTvStatus         = findViewById(R.id.tvStatus);
         mIvGpsStatus      = findViewById(R.id.ivGpsStatus);
         mIvBleStatus      = findViewById(R.id.ivBleStatus);
         mIvBleGpsStatus   = findViewById(R.id.ivBleGpsStatus);
         mBtnToggleView    = findViewById(R.id.btnToggleView);
+        mBtnKeepScreen    = findViewById(R.id.btnKeepScreen);
         mBtnConnect       = findViewById(R.id.btnConnect);
         mTvNmea           = findViewById(R.id.tvNmea);
         mTvShiftBanner    = findViewById(R.id.tvShiftBanner);
@@ -135,6 +147,23 @@ public class MainActivity extends AppCompatActivity {
                     ? WindCompassView.MODE_BOAT : WindCompassView.MODE_COMPASS;
             mCompassView.setMode(newMode);
             mBtnToggleView.setText(newMode == WindCompassView.MODE_COMPASS ? "BOAT VIEW" : "COMPASS VIEW");
+        });
+
+        mBtnKeepScreen.setOnClickListener(v -> {
+            boolean isCurrentlyOn = (getWindow().getAttributes().flags & WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON) != 0;
+            boolean newState = !isCurrentlyOn;
+            
+            if (newState) {
+                getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            } else {
+                getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            }
+            
+            PreferenceManager.getDefaultSharedPreferences(this)
+                    .edit().putBoolean("screen_on", newState).apply();
+            
+            updateKeepScreenButton(newState);
+            Toast.makeText(this, newState ? "Keep screen ON" : "Screen timeout ENABLED", Toast.LENGTH_SHORT).show();
         });
 
         mBtnConnect.setOnClickListener(v -> {
@@ -166,6 +195,13 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    private void updateKeepScreenButton(boolean screenOn) {
+        if (mBtnKeepScreen == null) return;
+        mBtnKeepScreen.setText(screenOn ? "SCREEN ALWAYS ON" : "SCREEN TIMEOUT");
+        // Optional: change alpha or style to indicate state
+        mBtnKeepScreen.setAlpha(screenOn ? 1.0f : 0.6f);
+    }
+
     private void observeViewModel() {
         mViewModel.getWindData().observe(this, wind -> {
             if (wind == null) return;
@@ -176,7 +212,14 @@ public class MainActivity extends AppCompatActivity {
             mTvTwd.setText(String.format("%.0f°T", wind.twd));
             mTvSog.setText(mViewModel.formatSpeed(wind.sog));
             mTvCog.setText(String.format("%.0f°T", wind.cog));
-            mCompassView.setWindData(wind.aws, wind.awa, wind.tws, wind.twa, wind.twd, wind.heading);
+            
+            if (mTvAws1m != null) mTvAws1m.setText(mViewModel.formatSpeed(wind.awsAvg1m));
+            if (mTvAwsMax1m != null) mTvAwsMax1m.setText(mViewModel.formatSpeed(wind.awsMax1m));
+            if (mTvAws1h != null) mTvAws1h.setText(mViewModel.formatSpeed(wind.awsAvg1h));
+            if (mTvAwsMax1h != null) mTvAwsMax1h.setText(mViewModel.formatSpeed(wind.awsMax1h));
+
+            mCompassView.setWindDataWithAverages(wind.aws, wind.awa, wind.tws, wind.twa, wind.twd, wind.heading, 
+                    wind.awsAvg1m, wind.awsAvg1h, wind.awsMax1m, wind.awsMax1h);
         });
 
         mViewModel.getCompassHeading().observe(this, h -> {
@@ -294,8 +337,15 @@ public class MainActivity extends AppCompatActivity {
             paint.setColorFilter(filter);
             mRootView.setLayerType(View.LAYER_TYPE_HARDWARE, paint);
             getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            updateKeepScreenButton(true);
         } else {
             mRootView.setLayerType(View.LAYER_TYPE_NONE, null);
+            // If night mode is off, revert to whatever the preference was
+            SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(this);
+            boolean screenOn = prefs.getBoolean("screen_on", true);
+            if (screenOn) getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            else getWindow().clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+            updateKeepScreenButton(screenOn);
         }
         invalidateOptionsMenu();
     }

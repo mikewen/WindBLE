@@ -23,6 +23,10 @@ public class WindCompassView extends View {
     // Wind data
     private float mAwa = 0f;
     private float mAws = 0f;
+    private float mAwsAvg1m = 0f;
+    private float mAwsAvg1h = 0f;
+    private float mAwsMax1m = 0f;
+    private float mAwsMax1h = 0f;
     private float mTwa = 0f;
     private float mTws = 0f;
     private float mTwd = 0f;
@@ -99,8 +103,6 @@ public class WindCompassView extends View {
     protected void onSizeChanged(int w, int h, int oldw, int oldh) {
         mCx = w / 2f;
         mCy = h / 2f;
-        // Increase padding significantly to prevent any clipping.
-        // 0.20f means the radius will be 30% of the view size, leaving 20% margin on each side.
         float padding = Math.min(w, h) * 0.12f;
         mRadius = Math.min(mCx, mCy) - padding;
         mRingRect.set(mCx - mRadius, mCy - mRadius, mCx + mRadius, mCy + mRadius);
@@ -111,8 +113,6 @@ public class WindCompassView extends View {
         super.onDraw(canvas);
         canvas.drawRect(0, 0, getWidth(), getHeight(), mBgPaint);
 
-        // Center the compass vertically to avoid top/bottom clipping issues.
-        // Moving it up slightly (0.05) to leave room for labels at the bottom.
         float visualCenterY = mCy - mRadius * 0.15f;
 
         canvas.save();
@@ -132,7 +132,33 @@ public class WindCompassView extends View {
         drawBoat(canvas);
         canvas.restore();
 
+        drawAvgLabels(canvas, visualCenterY);
         drawSpeedLabels(canvas, visualCenterY);
+    }
+
+    private void drawAvgLabels(Canvas canvas, float visualCenterY) {
+        float yAvg = visualCenterY - mRadius;
+        float textSize = mRadius * 0.10f;
+        float spacing = textSize * 1.1f;
+        float yMax = yAvg + spacing;
+
+        String avg1m = mSpeedFormatter != null ? mSpeedFormatter.format(mAwsAvg1m) : String.format("%.1f", mAwsAvg1m);
+        String avg1h = mSpeedFormatter != null ? mSpeedFormatter.format(mAwsAvg1h) : String.format("%.1f", mAwsAvg1h);
+        String max1m = mSpeedFormatter != null ? mSpeedFormatter.format(mAwsMax1m) : String.format("%.1f", mAwsMax1m);
+        String max1h = mSpeedFormatter != null ? mSpeedFormatter.format(mAwsMax1h) : String.format("%.1f", mAwsMax1h);
+
+        mTextPaint.setTextSize(textSize);
+        mTextPaint.setColor(COLOR_APPARENT);
+        
+        // 1m Left
+        mTextPaint.setTextAlign(Paint.Align.LEFT);
+        canvas.drawText("1m Avg: " + avg1m, 10, yAvg, mTextPaint);
+        canvas.drawText("Max: " + max1m, 10, yMax, mTextPaint);
+        
+        // 1h Right
+        mTextPaint.setTextAlign(Paint.Align.RIGHT);
+        canvas.drawText("1h Avg: " + avg1h, getWidth() - 10, yAvg, mTextPaint);
+        canvas.drawText("Max: " + max1h, getWidth() - 10, yMax, mTextPaint);
     }
 
     private void drawCompassRing(Canvas canvas) {
@@ -207,15 +233,14 @@ public class WindCompassView extends View {
     }
 
     private void drawSpeedLabels(Canvas canvas, float visualCenterY) {
-        // Position labels relative to the compass center, but near the bottom of the view.
         float cx = mCx;
         float boxY = visualCenterY + mRadius * 1.15f; 
-        float spacing = mRadius * 1.5f; // Increased spacing as requested.
+        float spacing = mRadius * 1.5f;
 
         String awsStr = mSpeedFormatter != null ? mSpeedFormatter.format(mAws) : String.format("%.1f", mAws);
         String twsStr = mSpeedFormatter != null ? mSpeedFormatter.format(mTws) : String.format("%.1f", mTws);
-        if (mShowApparentWind) drawDataBox(canvas, cx - spacing * 0.5f, boxY, COLOR_APPARENT, "AWS", awsStr, String.format("%.0f°", mAwa));
-        if (mShowTrueWind) drawDataBox(canvas, cx + spacing * 0.5f, boxY, COLOR_TRUE, "TWS", twsStr, String.format("%.0f°", mMode == MODE_COMPASS ? mTwd : mTwa));
+        if (mShowApparentWind) drawDataBox(canvas, cx - spacing * 0.5f, boxY, COLOR_APPARENT, "AWS", awsStr, String.format("%.1f°", mAwa));
+        if (mShowTrueWind) drawDataBox(canvas, cx + spacing * 0.5f, boxY, COLOR_TRUE, "TWS", twsStr, String.format("%.1f°", mMode == MODE_COMPASS ? mTwd : mTwa));
     }
 
     private void drawDataBox(Canvas canvas, float cx, float cy, int color, String label, String speed, String angle) {
@@ -253,6 +278,13 @@ public class WindCompassView extends View {
     public void setMode(int mode) { mMode = mode; invalidate(); }
     public void setWindData(float aws, float awa, float tws, float twa, float twd, float heading) {
         mAws = aws; mAwa = awa; mTws = tws; mTwa = twa; mTwd = twd; mHeading = heading; invalidate();
+    }
+    public void setWindDataWithAverages(float aws, float awa, float tws, float twa, float twd, float heading, 
+                                        float avg1m, float avg1h, float max1m, float max1h) {
+        mAws = aws; mAwa = awa; mTws = tws; mTwa = twa; mTwd = twd; mHeading = heading;
+        mAwsAvg1m = avg1m; mAwsAvg1h = avg1h;
+        mAwsMax1m = max1m; mAwsMax1h = max1h;
+        invalidate();
     }
     public void setHeading(float heading) { mHeading = heading; invalidate(); }
     public void setShowApparentWind(boolean show) { mShowApparentWind = show; invalidate(); }
