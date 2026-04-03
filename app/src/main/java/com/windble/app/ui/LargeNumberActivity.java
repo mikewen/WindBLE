@@ -66,11 +66,16 @@ public class LargeNumberActivity extends AppCompatActivity {
         mTvShiftBadge = findViewById(R.id.tvShiftBadge);
 
         mViewModel = new ViewModelProvider(this).get(WindViewModel.class);
+        mViewModel.bindBleService();
 
         // Tap anywhere to cycle to next field
         findViewById(R.id.largeNumberRoot).setOnClickListener(v -> {
             mCurrentField = (mCurrentField + 1) % FIELD_LABELS.length;
             updateFieldStyle();
+            // Force immediate update if data exists
+            if (mViewModel.getWindData().getValue() != null) {
+                updateDataDisplay(mViewModel.getWindData().getValue());
+            }
         });
 
         // Long-press returns to main
@@ -90,40 +95,7 @@ public class LargeNumberActivity extends AppCompatActivity {
     }
 
     private void observeData() {
-        mViewModel.getWindData().observe(this, wind -> {
-            if (wind == null) return;
-            String value, unit;
-            switch (mCurrentField) {
-                case FIELD_TWA:
-                    value = String.format("%.0f", wind.twa);
-                    unit  = "°";
-                    break;
-                case FIELD_TWS:
-                    String tws = mViewModel.formatSpeed(wind.tws);
-                    splitValueUnit(tws);
-                    return;
-                case FIELD_TWD:
-                    value = String.format("%.0f", wind.twd);
-                    unit  = "°T";
-                    break;
-                case FIELD_AWA:
-                    value = String.format("%.0f", wind.awa);
-                    unit  = "°";
-                    break;
-                case FIELD_AWS:
-                    String aws = mViewModel.formatSpeed(wind.aws);
-                    splitValueUnit(aws);
-                    return;
-                case FIELD_SOG:
-                    String sog = mViewModel.formatSpeed(wind.sog);
-                    splitValueUnit(sog);
-                    return;
-                default:
-                    return;
-            }
-            mTvValue.setText(value);
-            mTvUnit.setText(unit);
-        });
+        mViewModel.getWindData().observe(this, this::updateDataDisplay);
 
         // Show shift badge when a shift fires
         mViewModel.getShiftEvent().observe(this, shift -> {
@@ -139,6 +111,41 @@ public class LargeNumberActivity extends AppCompatActivity {
         });
     }
 
+    private void updateDataDisplay(com.windble.app.model.WindData wind) {
+        if (wind == null) return;
+        String value, unit;
+        switch (mCurrentField) {
+            case FIELD_TWA:
+                value = String.format("%.0f", wind.twa);
+                unit  = "°";
+                break;
+            case FIELD_TWS:
+                String tws = mViewModel.formatSpeed(wind.tws);
+                splitValueUnit(tws);
+                return;
+            case FIELD_TWD:
+                value = String.format("%.0f", wind.twd);
+                unit  = "°T";
+                break;
+            case FIELD_AWA:
+                value = String.format("%.0f", wind.awa);
+                unit  = "°";
+                break;
+            case FIELD_AWS:
+                String aws = mViewModel.formatSpeed(wind.aws);
+                splitValueUnit(aws);
+                return;
+            case FIELD_SOG:
+                String sog = mViewModel.formatSpeed(wind.sog);
+                splitValueUnit(sog);
+                return;
+            default:
+                return;
+        }
+        mTvValue.setText(value);
+        mTvUnit.setText(unit);
+    }
+
     /** Split a formatted speed string like "12.3 kt" into value + unit TextViews */
     private void splitValueUnit(String formatted) {
         int space = formatted.lastIndexOf(' ');
@@ -149,6 +156,12 @@ public class LargeNumberActivity extends AppCompatActivity {
             mTvValue.setText(formatted);
             mTvUnit.setText("");
         }
+    }
+
+    @Override
+    protected void onDestroy() {
+        mViewModel.unbindBleService();
+        super.onDestroy();
     }
 
     @Override
