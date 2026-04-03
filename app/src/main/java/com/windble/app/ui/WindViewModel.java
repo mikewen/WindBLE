@@ -33,6 +33,10 @@ import com.windble.app.gps.NmeaParser;
 import com.windble.app.logger.TripLogger;
 import com.windble.app.model.WindData;
 
+/**
+ * Main ViewModel for wind data processing and UI state.
+ * Handles BLE connectivity, GPS data merging, compass sensor, and preferences.
+ */
 public class WindViewModel extends AndroidViewModel {
     private static final String TAG = "WindViewModel";
 
@@ -70,6 +74,11 @@ public class WindViewModel extends AndroidViewModel {
     private final MutableLiveData<Boolean>     mNightMode       = new MutableLiveData<>(false);
 
     private int mSpeedUnit = UNIT_KNOTS;
+    private final SharedPreferences mPrefs;
+
+    // --- Calibration ---
+    private float mAwaOffset = 0f;
+    private float mAwsMultiplier = 1.0f;
 
     // --- Wind sensor BLE ---
     private BleService mBleService;
@@ -98,8 +107,9 @@ public class WindViewModel extends AndroidViewModel {
 
     public WindViewModel(@NonNull Application app) {
         super(app);
+        mPrefs = PreferenceManager.getDefaultSharedPreferences(app);
 
-        // Trip logger
+        // Trip logger setup
         mTripLogger = new TripLogger(app);
         mTripLogger.setListener(new TripLogger.LoggerListener() {
             @Override public void onLoggingStarted(String filename) {
@@ -115,17 +125,17 @@ public class WindViewModel extends AndroidViewModel {
             }
         });
 
-        // HTTP server (starts only when enabled by user)
+        // HTTP server for remote viewing (starts only when enabled by user)
         mHttpServer = new WindHttpServer(app);
 
-        // Wind shift alert
+        // Wind shift detection logic
         mShiftAlert = new WindShiftAlert(app);
         mShiftAlert.setListener((shiftDeg, type, newTwd) -> {
             mShiftEvent.postValue(new ShiftEvent(shiftDeg, type, newTwd));
             if (mHttpServer.isRunning()) mHttpServer.pushShiftEvent(shiftDeg, type.name(), newTwd);
         });
 
-        // Phone GPS
+        // Phone GPS manager
         mGpsManager = new GpsManager(app);
         mGpsManager.setListener(new GpsManager.GpsListener() {
             @Override
@@ -142,7 +152,7 @@ public class WindViewModel extends AndroidViewModel {
         });
         mGpsManager.start();
 
-        // BLE GPS
+        // BLE GPS manager (external NMEA sources)
         mBleGpsManager = new BleGpsManager(app);
         mBleGpsManager.setListener(new BleGpsManager.BleGpsListener() {
             @Override public void onGpsData(NmeaParser.RmcData data) {
@@ -162,7 +172,7 @@ public class WindViewModel extends AndroidViewModel {
             }
         });
 
-        // Compass
+        // Compass (magnetometer + accelerometer)
         mSensorManager = (SensorManager) app.getSystemService(Context.SENSOR_SERVICE);
         if (mSensorManager != null) {
             mAccelerometer = mSensorManager.getDefaultSensor(Sensor.TYPE_ACCELEROMETER);
@@ -173,16 +183,37 @@ public class WindViewModel extends AndroidViewModel {
                 mSensorManager.registerListener(mSensorListener, mMagnetometer, SensorManager.SENSOR_DELAY_UI);
         }
 
-        // Restore prefs
-        SharedPreferences prefs = PreferenceManager.getDefaultSharedPreferences(app);
-        String unit = prefs.getString("speed_unit", "knots");
+        // Load persisted preferences
+        loadPreferences();
+        mPrefs.registerOnSharedPreferenceChangeListener(mPrefListener);
+    }
+
+    /**
+     * Reads calibration and unit preferences from SharedPreferences.
+     */
+    private void loadPreferences() {
+        String unit = mPrefs.getString("speed_unit", "knots");
         if ("ms".equals(unit))       mSpeedUnit = UNIT_MS;
         else if ("kmh".equals(unit)) mSpeedUnit = UNIT_KMH;
         else                         mSpeedUnit = UNIT_KNOTS;
 
-        float threshold = prefs.getFloat("shift_threshold", 10f);
+        float threshold = mPrefs.getFloat("shift_threshold", 10f);
         mShiftAlert.setThreshold(threshold);
+
+        try {
+            mAwaOffset = Float.parseFloat(mPrefs.getString("awa_offset", "0.0"));
+            mAwsMultiplier = Float.parseFloat(mPrefs.getString("aws_multiplier", "1.0"));
+        } catch (NumberFormatException e) {
+            mAwaOffset = 0f;
+            mAwsMultiplier = 1.0f;
+        }
     }
+
+    private final SharedPreferences.OnSharedPreferenceChangeListener mPrefListener = (prefs, key) -> {
+        if ("speed_unit".equals(key) || "awa_offset".equals(key) || "aws_multiplier".equals(key) || "shift_threshold".equals(key)) {
+            loadPreferences();
+        }
+    };
 
     // ---- Wind BLE service ----
 
@@ -233,19 +264,25 @@ public class WindViewModel extends AndroidViewModel {
         }
     };
 
+    /**
+     * Entry point for raw BLE packets. Parses, calibrates, and calculates true wind.
+     */
     private void processPacket(byte[] raw) {
-        WindData wd = WindData.fromBytes(raw);
+        WindData wd = WindData.fromBytes(raw, mAwaOffset, mAwsMultiplier);
         if (wd == null) return;
         wd.sog = mSog; wd.cog = mCog; wd.heading = mHeading;
         wd.hasGps = Boolean.TRUE.equals(mGpsAvailable.getValue());
+        
+        // Main calculation: combine apparent wind with boat speed to get true wind
         wd.calculateTrueWind(wd.awa, wd.aws, mSog, mHeading);
         wd.valid = true;
 
-        // Feed subsystems
+        // Feed data to secondary systems
         mShiftAlert.onTwd(wd.twd);
         mTripLogger.log(wd);
         if (mTripLogger.isLogging()) mLogRowCount.postValue(mTripLogger.getRowCount());
 
+        // Update HTTP observers and UI
         if (mHttpServer.isRunning()) mHttpServer.pushWindData(wd, formatSpeedUnit());
         mWindData.postValue(wd);
     }
@@ -290,8 +327,7 @@ public class WindViewModel extends AndroidViewModel {
     }
     public void setShiftThreshold(float deg) {
         mShiftAlert.setThreshold(deg);
-        PreferenceManager.getDefaultSharedPreferences(getApplication())
-                .edit().putFloat("shift_threshold", deg).apply();
+        mPrefs.edit().putFloat("shift_threshold", deg).apply();
     }
     public void resetShiftBaseline() { mShiftAlert.resetBaseline(); }
     public WindShiftAlert getShiftAlert() { return mShiftAlert; }
@@ -309,11 +345,13 @@ public class WindViewModel extends AndroidViewModel {
                 mGravity = event.values.clone();
             else if (event.sensor.getType() == Sensor.TYPE_MAGNETIC_FIELD)
                 mGeomagnetic = event.values.clone();
+            
             if (mGravity != null && mGeomagnetic != null) {
                 float[] R = new float[9], I = new float[9];
                 if (SensorManager.getRotationMatrix(R, I, mGravity, mGeomagnetic)) {
                     float[] o = new float[3];
                     SensorManager.getOrientation(R, o);
+                    // o[0] is azimuth (heading) in radians
                     mHeading = ((float) Math.toDegrees(o[0]) + 360) % 360;
                     mCompassHeading.postValue(mHeading);
                 }
@@ -367,6 +405,7 @@ public class WindViewModel extends AndroidViewModel {
 
     @Override
     protected void onCleared() {
+        mPrefs.unregisterOnSharedPreferenceChangeListener(mPrefListener);
         unbindBleService();
         mGpsManager.stop();
         mBleGpsManager.disconnect();

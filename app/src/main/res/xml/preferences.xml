@@ -3,7 +3,6 @@
     xmlns:app="http://schemas.android.com/apk/res-auto">
 
     <PreferenceCategory android:title="Display">
-
         <ListPreference
             android:key="speed_unit"
             android:title="Speed Unit"
@@ -12,27 +11,40 @@
             android:entryValues="@array/speed_unit_values"
             android:defaultValue="knots"
             app:useSimpleSummaryProvider="true"/>
+    </PreferenceCategory>
 
+    <PreferenceCategory android:title="Calibration">
+        <EditTextPreference
+            android:key="awa_offset"
+            android:title="AWA Offset (degrees)"
+            android:summary="Added to raw AWA. Use negative for port offset."
+            android:defaultValue="0.0"
+            android:inputType="numberDecimal|numberSigned"
+            app:useSimpleSummaryProvider="true"/>
+
+        <EditTextPreference
+            android:key="aws_multiplier"
+            android:title="AWS Multiplier"
+            android:summary="Correction factor for wind speed (default 1.0)"
+            android:defaultValue="1.0"
+            android:inputType="numberDecimal"
+            app:useSimpleSummaryProvider="true"/>
     </PreferenceCategory>
 
     <PreferenceCategory android:title="Connection">
-
         <SwitchPreferenceCompat
             android:key="auto_reconnect"
             android:title="Auto-reconnect"
             android:summary="Automatically reconnect to last device"
             android:defaultValue="true"/>
-
     </PreferenceCategory>
 
-    <PreferenceCategory android:title="Display">
-
+    <PreferenceCategory android:title="System">
         <SwitchPreferenceCompat
             android:key="screen_on"
             android:title="Keep Screen On"
             android:summary="Prevent screen from sleeping while app is open"
             android:defaultValue="true"/>
-
     </PreferenceCategory>
 
 </PreferenceScreen>
