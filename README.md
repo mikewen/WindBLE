@@ -7,6 +7,8 @@ An Android app that reads wind speed and direction from a BLE wind sensor and di
 ### Wind Display
 - **BLE Wind Sensor** — Connects to sensors using service `ae00` / `ae30`, characteristic `ae02` (NOTIFY)
 - **Apparent Wind** — AWS (Apparent Wind Speed) and AWA (Apparent Wind Angle) decoded from sensor packets
+- **Real-time Filtering** — Applies EMA (Exponential Moving Average) smoothing to AWS and AWA; rejects abnormal spikes and zeroed-out sensor error packets
+- **Direction Gating** — AWA direction is held steady when AWS is below 0.5 knots to avoid erratic rotations in calm air
 - **True Wind Calculation** — Computes TWS / TWA / TWD via vector decomposition using SOG + heading
 - **Compass View** — North-up; compass ring counter-rotates with boat heading
 - **Boat View** — Bow-up; wind arrows relative to the boat
@@ -44,7 +46,7 @@ An Android app that reads wind speed and direction from a BLE wind sensor and di
 | 4–5  | AWA `uint16` big-endian, degrees × 100 |
 | 6    | XOR checksum of bytes 0–5 |
 
-Packets with an invalid checksum or `flags & 0x01 == 0` are silently discarded.
+Packets with an invalid checksum, `flags & 0x01 == 0`, or zeroed-out AWS/AWA sensor errors are silently discarded.
 
 ## BLE Profile
 
@@ -146,7 +148,7 @@ app/src/main/
         ├── ScanActivity.java        — BLE scan (modern + legacy API 19 fallback)
         ├── SettingsActivity.java    — Preferences fragment
         ├── WindCompassView.java     — Custom Canvas nautical compass
-        └── WindViewModel.java       — LiveData hub: BLE + GPS + compass + server + logger
+        └── WindViewModel.java       — LiveData hub: BLE + GPS + compass + server + logger; implements real-time EMA filtering and sensor data validation
 ```
 
 ## License

@@ -85,6 +85,12 @@ public class WindViewModel extends AndroidViewModel {
     private final Deque<AwsSample> mHistory1h = new ArrayDeque<>();
     private double mSum1m = 0, mSum1h = 0;
 
+    // Real-time filtering (EMA / Low-pass) to reject noise and abnormal data
+    private float mFilteredAws = Float.NaN;
+    private float mFilteredAwa = Float.NaN;
+    private static final float WIND_FILTER_ALPHA = 0.2f; // Smoothing factor (lower = smoother)
+    private static final float AWS_SPIKE_THRESHOLD = 30.0f; // Reject changes > 30m/s between packets
+
     public static class AwsSample { long ts; float val; AwsSample(long t, float v){ts=t; val=v;} }
     public static class ShiftEvent {
         public float shiftDeg, newTwd; public WindShiftAlert.ShiftType type;
@@ -261,6 +267,36 @@ public class WindViewModel extends AndroidViewModel {
     private void processPacket(byte[] raw) {
         WindData wd = WindData.fromBytes(raw, mAwaOffset, mAwsMultiplier);
         if (wd == null) return;
+
+        // 1. Filter out zeroed-out data which is usually a sensor error or power-save state
+        if (wd.aws < 0.01f && Math.abs(wd.awa - mAwaOffset) < 0.01f) {
+            Log.d(TAG, "Ignoring suspicious 0/0 wind data");
+            return;
+        }
+
+        // 2. Reject abnormal spikes
+        if (!Float.isNaN(mFilteredAws) && Math.abs(wd.aws - mFilteredAws) > AWS_SPIKE_THRESHOLD) {
+            Log.w(TAG, "Rejecting wind speed spike: " + wd.aws + " m/s");
+            return;
+        }
+
+        // 3. Apply EMA filter
+        if (Float.isNaN(mFilteredAws)) {
+            mFilteredAws = wd.aws;
+            mFilteredAwa = wd.awa;
+        } else {
+            mFilteredAws = mFilteredAws + WIND_FILTER_ALPHA * (wd.aws - mFilteredAws);
+            if (wd.aws > 0.25f) { // ~0.5 knots threshold
+                float diff = wd.awa - mFilteredAwa;
+                while (diff < -180) diff += 360;
+                while (diff > 180) diff -= 360;
+                mFilteredAwa = (mFilteredAwa + WIND_FILTER_ALPHA * diff + 360) % 360;
+            }
+        }
+
+        wd.aws = mFilteredAws;
+        wd.awa = Float.isNaN(mFilteredAwa) ? wd.awa : mFilteredAwa;
+
         wd.sog = mSog; wd.cog = mCog; wd.heading = mHeading;
         wd.hasGps = Boolean.TRUE.equals(mGpsAvailable.getValue());
         
@@ -397,4 +433,15 @@ public class WindViewModel extends AndroidViewModel {
         }
         @Override public void onAccuracyChanged(Sensor sensor, int accuracy) {}
     };
+
+    @Override
+    protected void onCleared() {
+        super.onCleared();
+        unbindBleService();
+        mGpsManager.stop();
+        mBleGpsManager.disconnect();
+        if (mSensorManager != null) mSensorManager.unregisterListener(mSensorListener);
+        mPrefs.unregisterOnSharedPreferenceChangeListener(mPrefListener);
+        mHttpServer.stop();
+    }
 }
